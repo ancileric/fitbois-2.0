@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { User, Goal, WeeklyUpdate, Proof, WorkoutDay, GOAL_CATEGORIES } from '../types';
+import { User, Goal, WeeklyUpdate, Proof, WorkoutDay } from '../types';
 import { getCurrentWeek, getChallengeProgress, getDaysUntilStart } from '../utils/dateUtils';
 import { Calendar, Target, Trophy, Users, AlertCircle, ChevronDown } from 'lucide-react';
 
