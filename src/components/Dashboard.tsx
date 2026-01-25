@@ -94,8 +94,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     const atRisk = users.filter(u => u.isActive).filter(user => {
       const userGoals = goals.filter(g => g.userId === user.id);
       const difficultGoals = userGoals.filter(g => g.isDifficult && !g.isCompleted);
-      const missingCategories = GOAL_CATEGORIES.length - new Set(userGoals.map(g => g.category)).size;
-      
+      // Note: missingCategories can be used for future risk factor analysis
+      // const missingCategories = GOAL_CATEGORIES.length - new Set(userGoals.map(g => g.category)).size;
+
       return (
         // Risk Factor 1: Elimination danger (1+ missed weeks at 5-day level)
         (user.currentConsistencyLevel === 5 && user.missedWeeks >= 1) ||

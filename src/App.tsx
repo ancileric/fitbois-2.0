@@ -239,10 +239,11 @@ function App() {
     }
   };
 
-  const addProof = (proof: Proof) => {
-    const newProofs = [...proofs, proof];
-    setProofs(newProofs);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const addProof = (_proof: Proof) => {
     // TODO: Implement API call to save proof to database
+    // const newProofs = [...proofs, proof];
+    // setProofs(newProofs);
   };
 
   const updateWorkoutDay = async (workoutDay: WorkoutDay) => {
