@@ -148,41 +148,45 @@ const Admin: React.FC<AdminProps> = ({
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-          <p className="text-gray-600 mt-1">
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+          <p className="text-gray-600 mt-1 text-sm md:text-base">
             Manage participants and track weekly workouts
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowUsersTable(!showUsersTable)}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-2"
+            className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-1 md:space-x-2"
+            title="Manage Users"
           >
             <Users size={18} />
-            <span>Manage Users</span>
+            <span className="hidden sm:inline">Users</span>
           </button>
           <button
             onClick={() => setShowWorkoutStats(!showWorkoutStats)}
-            className="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 flex items-center space-x-2"
+            className="bg-purple-500 text-white px-3 py-2 rounded-lg hover:bg-purple-600 flex items-center space-x-1 md:space-x-2"
+            title="Workout Stats"
           >
             <CheckCircle size={18} />
-            <span>Workout Stats</span>
+            <span className="hidden sm:inline">Stats</span>
           </button>
           <button
             onClick={() => setShowAddUser(true)}
-            className="bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600 flex items-center space-x-2"
+            className="bg-primary-500 text-white px-3 py-2 rounded-lg hover:bg-primary-600 flex items-center space-x-1 md:space-x-2"
+            title="Add User"
           >
             <UserPlus size={18} />
-            <span>Add User</span>
+            <span className="hidden sm:inline">Add</span>
           </button>
           <button
             onClick={() => alert('Database export feature coming soon!')}
-            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 flex items-center space-x-2"
+            className="bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 flex items-center space-x-1 md:space-x-2"
+            title="Export Database"
           >
             <Download size={18} />
-            <span>Export DB</span>
+            <span className="hidden sm:inline">Export</span>
           </button>
           <button
             onClick={() => {
@@ -191,10 +195,11 @@ const Admin: React.FC<AdminProps> = ({
                 alert('Consistency metrics recalculated for all users!');
               }
             }}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-2"
+            className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-1 md:space-x-2"
+            title="Recalculate Consistency"
           >
             <RotateCcw size={18} />
-            <span>Recalculate</span>
+            <span className="hidden sm:inline">Recalc</span>
           </button>
         </div>
       </div>
@@ -212,19 +217,88 @@ const Admin: React.FC<AdminProps> = ({
 
       {/* Users Management Table */}
       {showUsersTable && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">Users Management</h2>
+        <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900">Users Management</h2>
             <button
               onClick={() => setShowAddUser(true)}
-              className="bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600 flex items-center space-x-2"
+              className="bg-primary-500 text-white px-3 py-2 rounded-lg hover:bg-primary-600 flex items-center justify-center space-x-2 w-full sm:w-auto"
             >
               <UserPlus size={18} />
               <span>Add New User</span>
             </button>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {users.sort((a, b) => a.name.localeCompare(b.name)).map((user) => (
+              <div key={user.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center">
+                      {user.avatar || user.name.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">{user.name}</div>
+                      <div className="text-xs text-gray-500">Level {user.currentConsistencyLevel}</div>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    user.isActive
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
+                  }`}>
+                    {user.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                  <div className="bg-green-50 rounded p-2">
+                    <div className="text-sm font-bold text-green-600">{user.cleanWeeks}</div>
+                    <div className="text-[10px] text-green-700">Clean</div>
+                  </div>
+                  <div className="bg-red-50 rounded p-2">
+                    <div className="text-sm font-bold text-red-600">{user.missedWeeks}</div>
+                    <div className="text-[10px] text-red-700">Missed</div>
+                  </div>
+                  <div className="bg-purple-50 rounded p-2">
+                    <div className="text-sm font-bold text-purple-600">{user.totalPoints}</div>
+                    <div className="text-[10px] text-purple-700">Points</div>
+                  </div>
+                </div>
+
+                {user.specialRules?.startingLevel && (
+                  <div className="mb-3">
+                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                      🏆 Starts at {user.specialRules.startingLevel} days
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEditUser(user)}
+                    className="flex-1 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-200 flex items-center justify-center space-x-1"
+                  >
+                    <Edit size={14} />
+                    <span>Edit</span>
+                  </button>
+                  {user.isActive && (
+                    <button
+                      onClick={() => handleDeactivateUser(user)}
+                      className="flex-1 bg-red-100 text-red-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-200 flex items-center justify-center space-x-1"
+                    >
+                      <Trash2 size={14} />
+                      <span>Remove</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">
@@ -246,7 +320,7 @@ const Admin: React.FC<AdminProps> = ({
                       <div className="font-medium text-gray-900">{user.name}</div>
                       <div className="text-sm text-gray-500">ID: {user.id}</div>
                     </td>
-                    
+
                     <td className="py-4 px-4 text-center">
                       <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center mx-auto">
                         {user.avatar || user.name.charAt(0)}
@@ -273,8 +347,8 @@ const Admin: React.FC<AdminProps> = ({
 
                     <td className="py-4 px-4 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        user.isActive 
-                          ? 'bg-green-100 text-green-800' 
+                        user.isActive
+                          ? 'bg-green-100 text-green-800'
                           : 'bg-red-100 text-red-800'
                       }`}>
                         {user.isActive ? 'Active' : 'Inactive'}
@@ -398,13 +472,13 @@ const Admin: React.FC<AdminProps> = ({
       {/* Add/Edit User Modal */}
       {showAddUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg">
+          <div className="bg-white rounded-xl p-4 md:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
               {editingUser ? 'Edit Participant' : 'Add New Participant'}
             </h3>
-            
+
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
                   <input
@@ -415,7 +489,7 @@ const Admin: React.FC<AdminProps> = ({
                     placeholder="Enter participant name"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Avatar (emoji/letter)</label>
                   <input
@@ -429,7 +503,7 @@ const Admin: React.FC<AdminProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Consistency Level</label>
                   <select
@@ -466,7 +540,7 @@ const Admin: React.FC<AdminProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                   <select
@@ -483,11 +557,11 @@ const Admin: React.FC<AdminProps> = ({
                   <label className="block text-sm font-medium text-gray-700 mb-1">Special Starting Level</label>
                   <select
                     value={newUser.specialRules.startingLevel || ''}
-                    onChange={(e) => setNewUser({ 
-                      ...newUser, 
-                      specialRules: { 
-                        startingLevel: e.target.value ? Number(e.target.value) : undefined 
-                      } 
+                    onChange={(e) => setNewUser({
+                      ...newUser,
+                      specialRules: {
+                        startingLevel: e.target.value ? Number(e.target.value) : undefined
+                      }
                     })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2"
                   >

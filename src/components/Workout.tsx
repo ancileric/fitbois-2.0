@@ -246,29 +246,94 @@ const Workout: React.FC<WorkoutProps> = ({
       </div>
 
       {/* 3. Workout Tracking Grid */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-6">
+      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-2">
           <h2 className="text-lg font-semibold text-gray-900">
             Week {selectedWeek} Workout Tracking
           </h2>
-          <div className="flex items-center space-x-4">
-            <div className="text-sm text-gray-500">
-              Click checkmarks to toggle workout completion
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-              <span className="text-xs text-blue-600">Database Connected</span>
-            </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+            <span className="text-xs text-blue-600">Database Connected</span>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="md:hidden space-y-3">
+          {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => {
+            const weekStats = getUserWeekStats(user.id, selectedWeek);
+
+            return (
+              <div
+                key={user.id}
+                className={`p-4 rounded-lg border ${
+                  weekStats.isComplete
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-gray-50 border-gray-200'
+                }`}
+              >
+                {/* User Info Row */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center text-sm font-medium">
+                      {user.avatar || user.name.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-medium text-gray-900">{user.name}</span>
+                        {weekStats.isComplete && <span className="text-green-600">✅</span>}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Level {user.currentConsistencyLevel} • {user.cleanWeeks} clean weeks
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`text-sm font-bold ${
+                    weekStats.isComplete ? 'text-green-600' : 'text-gray-600'
+                  }`}>
+                    {weekStats.completed}/{weekStats.required}
+                  </div>
+                </div>
+
+                {/* Days Row */}
+                <div className="flex justify-between items-center">
+                  {daysOfWeek.map((day, dayIndex) => {
+                    const workoutDay = getWorkoutDay(user.id, selectedWeek, dayIndex + 1);
+                    const isCompleted = workoutDay?.isCompleted || false;
+
+                    return (
+                      <div key={day} className="flex flex-col items-center">
+                        <span className="text-xs text-gray-500 mb-1">{day.charAt(0)}</span>
+                        <button
+                          onClick={() => toggleWorkout(user.id, selectedWeek, dayIndex + 1)}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                            isCompleted
+                              ? 'bg-green-500 text-white'
+                              : 'bg-gray-200 text-gray-400'
+                          }`}
+                        >
+                          {isCompleted ? (
+                            <CheckCircle size={18} />
+                          ) : (
+                            <XCircle size={18} />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="text-left py-3 px-4 font-medium text-gray-900 w-64">Participant</th>
                 <th className="text-center py-3 px-3 font-medium text-gray-900 w-16">Level</th>
-                {daysOfWeek.map((day, index) => (
+                {daysOfWeek.map((day) => (
                   <th key={day} className="text-center py-3 px-3 font-medium text-gray-900 w-16">
                     {day}
                   </th>
@@ -279,11 +344,11 @@ const Workout: React.FC<WorkoutProps> = ({
             <tbody>
               {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => {
                 const weekStats = getUserWeekStats(user.id, selectedWeek);
-                
+
                 return (
                   <tr key={user.id} className={`border-b border-gray-100 transition-colors ${
-                    weekStats.isComplete 
-                      ? 'bg-green-50 hover:bg-green-100 border-green-200' 
+                    weekStats.isComplete
+                      ? 'bg-green-50 hover:bg-green-100 border-green-200'
                       : 'hover:bg-gray-50'
                   }`}>
                     <td className="py-4 px-4">
@@ -307,7 +372,7 @@ const Workout: React.FC<WorkoutProps> = ({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-4 px-3 text-center">
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
                         {user.currentConsistencyLevel}
@@ -317,7 +382,7 @@ const Workout: React.FC<WorkoutProps> = ({
                     {daysOfWeek.map((day, dayIndex) => {
                       const workoutDay = getWorkoutDay(user.id, selectedWeek, dayIndex + 1);
                       const isCompleted = workoutDay?.isCompleted || false;
-                      
+
                       return (
                         <td key={day} className="py-4 px-3 text-center">
                           <div className="flex justify-center">

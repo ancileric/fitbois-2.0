@@ -96,39 +96,39 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
           const { user, activeGoals, completedGoals, missingCategories, hasAllCategories, needsDifficultGoal } = userGoals;
           
           return (
-            <div key={user.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+            <div key={user.id} className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
               {/* User Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-primary-500 text-white rounded-full flex items-center justify-center text-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
+                <div className="flex items-center space-x-3 sm:space-x-4">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary-500 text-white rounded-full flex items-center justify-center text-base sm:text-lg">
                     {user.avatar || user.name.charAt(0)}
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold text-gray-900">{user.name}</h2>
-                    <p className="text-sm text-gray-500">
+                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900">{user.name}</h2>
+                    <p className="text-xs sm:text-sm text-gray-500">
                       {activeGoals.length}/5 active goals • {completedGoals.length} completed
                     </p>
                   </div>
                 </div>
-                
+
                 {/* Status Indicators and Actions */}
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {hasAllCategories ? (
-                    <span className="px-3 py-1 bg-green-100 text-green-800 text-sm font-medium rounded-full">
+                    <span className="px-2 sm:px-3 py-1 bg-green-100 text-green-800 text-xs sm:text-sm font-medium rounded-full">
                       ✅ All Categories
                     </span>
                   ) : (
-                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-sm font-medium rounded-full">
+                    <span className="px-2 sm:px-3 py-1 bg-yellow-100 text-yellow-800 text-xs sm:text-sm font-medium rounded-full">
                       {missingCategories.length} Missing
                     </span>
                   )}
-                  
+
                   {needsDifficultGoal && (
-                    <span className="px-3 py-1 bg-orange-100 text-orange-800 text-sm font-medium rounded-full">
-                      ⚠️ Need Difficult Goal
+                    <span className="px-2 sm:px-3 py-1 bg-orange-100 text-orange-800 text-xs sm:text-sm font-medium rounded-full">
+                      ⚠️ Need Difficult
                     </span>
                   )}
-                  
+
                   {(activeGoals.length > 0 || completedGoals.length > 0) && (
                     <button
                       onClick={() => {
@@ -136,7 +136,7 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                           [...activeGoals, ...completedGoals].forEach(goal => onDeleteGoal(goal.id));
                         }
                       }}
-                      className="px-3 py-1 bg-red-100 text-red-800 text-sm font-medium rounded-full hover:bg-red-200 flex items-center space-x-1"
+                      className="px-2 sm:px-3 py-1 bg-red-100 text-red-800 text-xs sm:text-sm font-medium rounded-full hover:bg-red-200 flex items-center space-x-1"
                     >
                       <Trash2 size={12} />
                       <span>Clear All</span>
@@ -174,78 +174,150 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
 
               {/* Compact 5-Row Goals Format */}
               <div className="space-y-3">
-                <h3 className="text-lg font-medium text-gray-900">Goals (5 Categories)</h3>
+                <h3 className="text-base sm:text-lg font-medium text-gray-900">Goals (5 Categories)</h3>
                 <div className="space-y-2">
                   {GOAL_CATEGORIES.map((category) => {
                     const goal = [...activeGoals, ...completedGoals].find(g => g.category === category.id);
-                    
+
                     return (
-                      <div key={category.id} className={`flex items-center justify-between p-4 rounded-lg border ${
+                      <div key={category.id} className={`p-3 sm:p-4 rounded-lg border ${
                         goal?.isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
                       }`}>
-                        <div className="flex items-center space-x-3 flex-1">
-                          <span className="text-xl">{category.icon}</span>
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{category.name}</div>
+                        {/* Mobile Layout */}
+                        <div className="sm:hidden">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-lg">{category.icon}</span>
+                              <div className="font-medium text-gray-900 text-sm">{category.name}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {goal?.isDifficult && (
+                                <span className="px-1.5 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                  Difficult
+                                </span>
+                              )}
+                              {goal?.isCompleted && (
+                                <span className="px-1.5 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                  ✅
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mb-2">
                             {goal ? (
-                              <div className="text-sm text-gray-600">{goal.description}</div>
+                              <div className="text-xs text-gray-600">{goal.description}</div>
                             ) : (
-                              <div className="text-sm text-gray-400 italic">No goal set for this category</div>
+                              <div className="text-xs text-gray-400 italic">No goal set</div>
                             )}
                             {goal?.completedDate && (
                               <div className="text-xs text-green-600 mt-1">
-                                ✅ Completed on {new Date(goal.completedDate).toLocaleDateString()}
+                                Completed {new Date(goal.completedDate).toLocaleDateString()}
                               </div>
                             )}
                           </div>
-                        </div>
-                        
-                        <div className="flex items-center space-x-2">
-                          {goal?.isDifficult && (
-                            <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded">
-                              Difficult
-                            </span>
-                          )}
-                          
-                          {goal?.isCompleted && (
-                            <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
-                              ✅ Complete
-                            </span>
-                          )}
-                          
-                          {goal ? (
-                            <div className="flex space-x-2">
-                              {!goal.isCompleted && (
+                          <div className="flex gap-2">
+                            {goal ? (
+                              <>
+                                {!goal.isCompleted && (
+                                  <button
+                                    onClick={() => handleCompleteGoal(goal)}
+                                    className="flex-1 bg-green-500 text-white px-2 py-1.5 rounded text-xs hover:bg-green-600"
+                                  >
+                                    Complete
+                                  </button>
+                                )}
                                 <button
-                                  onClick={() => handleCompleteGoal(goal)}
-                                  className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
+                                  onClick={() => {
+                                    if (window.confirm('Delete this goal?')) {
+                                      onDeleteGoal(goal.id);
+                                    }
+                                  }}
+                                  className={`${goal.isCompleted ? 'flex-1' : ''} bg-red-500 text-white px-2 py-1.5 rounded text-xs hover:bg-red-600`}
                                 >
-                                  Complete
+                                  Delete
                                 </button>
-                              )}
+                              </>
+                            ) : (
                               <button
                                 onClick={() => {
-                                  if (window.confirm('Delete this goal?')) {
-                                    onDeleteGoal(goal.id);
-                                  }
+                                  setSelectedUserId(user.id);
+                                  setNewGoal({ ...newGoal, category: category.id as GoalCategory });
+                                  setShowAddGoal(true);
                                 }}
-                                className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                className="flex-1 bg-primary-500 text-white px-2 py-1.5 rounded text-xs hover:bg-primary-600"
                               >
-                                Delete
+                                Add Goal
                               </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Desktop Layout */}
+                        <div className="hidden sm:flex sm:items-center sm:justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            <span className="text-xl">{category.icon}</span>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">{category.name}</div>
+                              {goal ? (
+                                <div className="text-sm text-gray-600">{goal.description}</div>
+                              ) : (
+                                <div className="text-sm text-gray-400 italic">No goal set for this category</div>
+                              )}
+                              {goal?.completedDate && (
+                                <div className="text-xs text-green-600 mt-1">
+                                  ✅ Completed on {new Date(goal.completedDate).toLocaleDateString()}
+                                </div>
+                              )}
                             </div>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setSelectedUserId(user.id);
-                                setNewGoal({ ...newGoal, category: category.id as GoalCategory });
-                                setShowAddGoal(true);
-                              }}
-                              className="bg-primary-500 text-white px-3 py-1 rounded text-sm hover:bg-primary-600"
-                            >
-                              Add Goal
-                            </button>
-                          )}
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            {goal?.isDifficult && (
+                              <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                Difficult
+                              </span>
+                            )}
+
+                            {goal?.isCompleted && (
+                              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                ✅ Complete
+                              </span>
+                            )}
+
+                            {goal ? (
+                              <div className="flex space-x-2">
+                                {!goal.isCompleted && (
+                                  <button
+                                    onClick={() => handleCompleteGoal(goal)}
+                                    className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
+                                  >
+                                    Complete
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('Delete this goal?')) {
+                                      onDeleteGoal(goal.id);
+                                    }
+                                  }}
+                                  className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setSelectedUserId(user.id);
+                                  setNewGoal({ ...newGoal, category: category.id as GoalCategory });
+                                  setShowAddGoal(true);
+                                }}
+                                className="bg-primary-500 text-white px-3 py-1 rounded text-sm hover:bg-primary-600"
+                              >
+                                Add Goal
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

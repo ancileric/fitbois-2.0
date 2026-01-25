@@ -271,9 +271,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-8">
       {/* 1. Challenge Overview */}
-      <div className="bg-gradient-to-r from-primary-500 to-primary-700 rounded-xl p-6 text-white">
-        <h1 className="text-3xl font-bold mb-2">FitBois 2.0 Dashboard 💪</h1>
-        <p className="text-primary-100 mb-4">
+      <div className="bg-gradient-to-r from-primary-500 to-primary-700 rounded-xl p-4 md:p-6 text-white">
+        <h1 className="text-2xl md:text-3xl font-bold mb-2">FitBois 2.0 Dashboard 💪</h1>
+        <p className="text-primary-100 mb-4 text-sm md:text-base">
           Challenge overview and participant tracking
         </p>
         
@@ -328,21 +328,63 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* 2. Leaderboard - All Users */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-        <h2 className="text-xl font-semibold text-gray-900 mb-6">Leaderboard</h2>
+      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
+        <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4 md:mb-6">Leaderboard</h2>
         <div className="space-y-3">
           {leaderboardData.map((user, index) => {
             const isAtRisk = bottomPerformers.includes(user.id);
             return (
               <div
                 key={user.id}
-                className={`p-4 rounded-lg border-2 transition-colors ${
-                  isAtRisk 
-                    ? 'border-red-200 bg-red-50' 
+                className={`p-3 md:p-4 rounded-lg border-2 transition-colors ${
+                  isAtRisk
+                    ? 'border-red-200 bg-red-50'
                     : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <div className="flex items-center justify-between">
+                {/* Mobile Layout */}
+                <div className="md:hidden">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="text-base font-bold text-gray-500 w-6">
+                        #{index + 1}
+                      </div>
+                      <div className="w-9 h-9 bg-primary-500 text-white rounded-full flex items-center justify-center text-sm">
+                        {user.avatar || user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-sm">{user.name}</h3>
+                        <p className="text-xs text-gray-500">Level {user.currentConsistencyLevel}</p>
+                      </div>
+                    </div>
+                    {isAtRisk && (
+                      <span className="px-1.5 py-0.5 bg-red-100 text-red-800 text-xs font-medium rounded">
+                        ⚠️
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div>
+                      <div className="text-sm font-bold text-green-600">{user.cleanWeeks}</div>
+                      <div className="text-[10px] text-gray-500">Clean</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-red-600">{user.missedWeeks}</div>
+                      <div className="text-[10px] text-gray-500">Missed</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-blue-600">{user.completedGoals}</div>
+                      <div className="text-[10px] text-gray-500">Goals</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-purple-600">{user.totalPoints}</div>
+                      <div className="text-[10px] text-gray-500">Points</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desktop Layout */}
+                <div className="hidden md:flex md:items-center md:justify-between">
                   <div className="flex items-center space-x-4">
                     <div className="text-lg font-bold text-gray-500 w-8">
                       #{index + 1}
@@ -360,7 +402,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                     )}
                   </div>
-                  
+
                   <div className="grid grid-cols-4 gap-6 text-center">
                     <div>
                       <div className="text-lg font-bold text-green-600">{user.cleanWeeks}</div>
@@ -435,16 +477,16 @@ const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* 4. User Activity Heatmap */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">Activity Heatmap</h2>
-          
+      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
+          <h2 className="text-lg md:text-xl font-semibold text-gray-900">Activity Heatmap</h2>
+
           {/* User Selector */}
           <div className="relative">
             <select
               value={selectedHeatmapUser}
               onChange={(e) => setSelectedHeatmapUser(e.target.value)}
-              className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-primary-500 w-full sm:w-auto"
             >
               {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => (
                 <option key={user.id} value={user.id}>
@@ -456,23 +498,22 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* GitHub-style Heatmap - Full Width */}
-        <div className="w-full">
-          {/* Calculate total weeks for proper distribution */}
-          <div className="relative" style={{ minHeight: '200px' }}>
+        {/* GitHub-style Heatmap - Scrollable on mobile */}
+        <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+          <div style={{ minWidth: '600px' }}>
             {/* Month headers - distributed across full width */}
             <div className="flex mb-3 w-full">
-              <div className="w-16"></div> {/* Space for day labels */}
+              <div className="w-10 md:w-16 flex-shrink-0"></div> {/* Space for day labels */}
               <div className="flex-1 grid gap-1" style={{ gridTemplateColumns: `repeat(${heatmapData.weeks.length}, 1fr)` }}>
                 {heatmapData.weeks.map((week, weekIndex) => {
                   // Find the first day of this week to determine the month
                   const firstDay = week.days.find(d => d !== null);
                   const isFirstWeekOfMonth = heatmapData.months.some(m => m.startCol === weekIndex);
-                  
+
                   return (
                     <div key={weekIndex} className="text-center">
                       {isFirstWeekOfMonth && firstDay && (
-                        <div className="text-sm text-gray-700 font-medium">
+                        <div className="text-xs md:text-sm text-gray-700 font-medium">
                           {new Date(2026, firstDay.month).toLocaleString('default', { month: 'short' })}
                         </div>
                       )}
@@ -485,20 +526,21 @@ const Dashboard: React.FC<DashboardProps> = ({
             {/* Main heatmap container */}
             <div className="flex w-full">
               {/* Day of week labels on the left */}
-              <div className="w-16 flex flex-col justify-start pr-3">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                  <div 
-                    key={day} 
-                    className="flex items-center text-sm text-gray-600 text-right"
-                    style={{ height: '28px', marginBottom: '2px' }}
+              <div className="w-10 md:w-16 flex-shrink-0 flex flex-col justify-start pr-1 md:pr-3">
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center text-xs md:text-sm text-gray-600 text-right"
+                    style={{ height: '20px', marginBottom: '2px' }}
                   >
-                    {day}
+                    <span className="md:hidden">{day}</span>
+                    <span className="hidden md:inline">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}</span>
                   </div>
                 ))}
               </div>
 
               {/* Heatmap grid - distributed across full width */}
-              <div className="flex-1 grid gap-1" style={{ gridTemplateColumns: `repeat(${heatmapData.weeks.length}, 1fr)` }}>
+              <div className="flex-1 grid gap-0.5 md:gap-1" style={{ gridTemplateColumns: `repeat(${heatmapData.weeks.length}, 1fr)` }}>
                 {heatmapData.weeks.map((week) => (
                   <div key={week.weekNumber} className="flex flex-col space-y-0.5 justify-start">
                     {week.days.map((day, dayIndex) => {
@@ -506,14 +548,15 @@ const Dashboard: React.FC<DashboardProps> = ({
                         return (
                           <div
                             key={`${week.weekNumber}-empty-${dayIndex}`}
-                            className="w-full aspect-square max-w-7 max-h-7"
+                            className="w-full aspect-square"
+                            style={{ maxWidth: '20px', maxHeight: '20px' }}
                           ></div>
                         );
                       }
 
                       // Color logic based on your specifications
                       let cellColor = 'bg-gray-100 border border-gray-200'; // Default: no workout
-                      
+
                       if (day.isCompleted) {
                         if (week.metWeeklyGoal) {
                           cellColor = 'bg-green-600 border border-green-700'; // Dark green: workout + weekly goal met
@@ -521,7 +564,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           cellColor = 'bg-green-300 border border-green-400'; // Light green: workout but weekly goal not met
                         }
                       }
-                      
+
                       // Special shade for goal completion
                       if (day.goalsCompleted > 0) {
                         cellColor = 'bg-green-400 border-2 border-yellow-400';
@@ -530,12 +573,13 @@ const Dashboard: React.FC<DashboardProps> = ({
                       return (
                         <div
                           key={`${week.weekNumber}-${day.dayOfWeek}`}
-                          className={`w-full aspect-square max-w-7 max-h-7 rounded-sm ${cellColor} transition-all cursor-pointer hover:scale-105`}
+                          className={`w-full aspect-square rounded-sm ${cellColor} transition-all cursor-pointer hover:scale-105`}
+                          style={{ maxWidth: '20px', maxHeight: '20px' }}
                           title={`${day.date}: ${
-                            day.isCompleted 
+                            day.isCompleted
                               ? `✅ Workout completed${day.workoutType ? ` (${day.workoutType})` : ''}${
                                   week.metWeeklyGoal ? ' | 🎯 Weekly goal met' : ''
-                                }` 
+                                }`
                               : '❌ No workout'
                           }${day.goalsCompleted > 0 ? ` | 🏆 ${day.goalsCompleted} goal(s) completed` : ''}`}
                         ></div>
@@ -545,40 +589,38 @@ const Dashboard: React.FC<DashboardProps> = ({
                 ))}
               </div>
             </div>
+          </div>
+        </div>
 
-            {/* Summary stats */}
-            <div className="mt-6 flex items-center justify-between text-sm text-gray-600">
-              <div className="flex items-center space-x-6">
-                <span>
-                  <strong>{heatmapData.weeks.filter(w => w.metWeeklyGoal).length}</strong> weeks completed
-                </span>
-                <span>
-                  <strong>{heatmapData.weeks.reduce((sum, w) => sum + w.totalWorkouts, 0)}</strong> total workouts
-                </span>
-                <span>
-                  <strong>{goals.filter(g => g.userId === selectedHeatmapUser && g.isCompleted).length}</strong> goals achieved
-                </span>
-              </div>
-            </div>
+        {/* Summary stats */}
+        <div className="mt-4 md:mt-6 flex flex-wrap gap-3 md:gap-6 text-xs md:text-sm text-gray-600">
+          <span>
+            <strong>{heatmapData.weeks.filter(w => w.metWeeklyGoal).length}</strong> weeks completed
+          </span>
+          <span>
+            <strong>{heatmapData.weeks.reduce((sum, w) => sum + w.totalWorkouts, 0)}</strong> total workouts
+          </span>
+          <span>
+            <strong>{goals.filter(g => g.userId === selectedHeatmapUser && g.isCompleted).length}</strong> goals achieved
+          </span>
+        </div>
 
-            {/* Legend */}
-            <div className="flex items-center justify-between mt-6 pt-4 border-t">
-              <div className="flex items-center space-x-4 text-sm">
-                <span className="text-gray-600">Less</span>
-                <div className="flex items-center space-x-1">
-                  <div className="w-4 h-4 bg-gray-100 border border-gray-200 rounded-sm"></div>
-                  <div className="w-4 h-4 bg-green-200 border border-green-300 rounded-sm"></div>
-                  <div className="w-4 h-4 bg-green-300 border border-green-400 rounded-sm"></div>
-                  <div className="w-4 h-4 bg-green-500 border border-green-600 rounded-sm"></div>
-                  <div className="w-4 h-4 bg-green-600 border border-green-700 rounded-sm"></div>
-                </div>
-                <span className="text-gray-600">More</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 bg-green-400 border-2 border-yellow-400 rounded-sm"></div>
-                <span className="text-gray-600 text-sm">Goal completed</span>
-              </div>
+        {/* Legend */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-4 md:mt-6 pt-4 border-t gap-3">
+          <div className="flex items-center space-x-2 md:space-x-4 text-xs md:text-sm">
+            <span className="text-gray-600">Less</span>
+            <div className="flex items-center space-x-0.5 md:space-x-1">
+              <div className="w-3 h-3 md:w-4 md:h-4 bg-gray-100 border border-gray-200 rounded-sm"></div>
+              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-200 border border-green-300 rounded-sm"></div>
+              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-300 border border-green-400 rounded-sm"></div>
+              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-500 border border-green-600 rounded-sm"></div>
+              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-600 border border-green-700 rounded-sm"></div>
             </div>
+            <span className="text-gray-600">More</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-3 h-3 md:w-4 md:h-4 bg-green-400 border-2 border-yellow-400 rounded-sm"></div>
+            <span className="text-gray-600 text-xs md:text-sm">Goal completed</span>
           </div>
         </div>
       </div>
