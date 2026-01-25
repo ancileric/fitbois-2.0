@@ -1,6 +1,10 @@
 import { User, Goal, WorkoutDay } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// In production, use relative URL since frontend and backend are on same server
+// In development, use localhost:5000
+const API_BASE_URL = process.env.NODE_ENV === 'production'
+  ? '/api'
+  : (process.env.REACT_APP_API_URL || 'http://localhost:5000/api');
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 const CACHE_TTL = 5000; // 5 seconds cache for GET requests
 
