@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { User, WorkoutDay, AdminSettings } from '../types';
-import { 
-  CheckCircle, 
-  XCircle, 
-  Users, 
-  Calendar
+import {
+  CheckCircle,
+  XCircle,
+  Users,
+  Calendar,
+  ChevronDown
 } from 'lucide-react';
 import { getCurrentWeek, getDaysUntilStart } from '../utils/dateUtils';
 
@@ -21,13 +22,13 @@ const Workout: React.FC<WorkoutProps> = ({
   adminSettings,
   onUpdateWorkoutDay,
 }) => {
-  const [selectedWeek, setSelectedWeek] = useState(1);
+  // Calculate current week first so we can use it for initial state
+  const currentWeek = getCurrentWeek(adminSettings.challengeStartDate);
+  const [selectedWeek, setSelectedWeek] = useState(() => currentWeek > 0 ? currentWeek : 1);
 
-  // Calculate current week and total weeks
+  // Calculate total weeks
   const startDate = new Date(adminSettings.challengeStartDate);
   const endDate = new Date(adminSettings.challengeEndDate);
-  
-  const currentWeek = getCurrentWeek(adminSettings.challengeStartDate);
   const totalWeeks = Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
   
   const weeks = Array.from({ length: totalWeeks }, (_, i) => i + 1);
@@ -140,120 +141,60 @@ const Workout: React.FC<WorkoutProps> = ({
   }, [users, workoutDays, weeks]);
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="space-y-4">
+      {/* Header with inline stats */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Workout Tracking</h1>
-        <p className="text-gray-600 mt-1">
-          Track daily workouts and weekly progress for all participants
-        </p>
-      </div>
-
-      {/* 1. Challenge Overview (4 Summary Tiles) */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <div className="flex items-center space-x-3 mb-2">
-            <Users className="w-6 h-6 text-primary-500" />
-            <h3 className="font-medium text-gray-900">Total Participants</h3>
-          </div>
-          <div className="text-2xl font-bold text-primary-600">{users.filter(u => u.isActive).length}</div>
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <div className="flex items-center space-x-3 mb-2">
-            <Calendar className="w-6 h-6 text-green-500" />
-            <h3 className="font-medium text-gray-900">Current Week</h3>
-          </div>
-          <div className="text-2xl font-bold text-green-600">
-            {currentWeek <= 0 ? 'Not Started' : currentWeek}
-          </div>
-          {currentWeek <= 0 && (
-            <div className="text-xs text-gray-500 mt-1">
-              Starts in {getDaysUntilStart(adminSettings.challengeStartDate)} days
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <div className="flex items-center space-x-3 mb-2">
-            <CheckCircle className="w-6 h-6 text-blue-500" />
-            <h3 className="font-medium text-gray-900">Week Completion</h3>
-          </div>
-          <div className="text-2xl font-bold text-blue-600">
-            {currentWeek <= 0 
-              ? '0%' 
-              : (weeklyStats[Math.max(0, currentWeek - 1)]?.completionRate.toFixed(0) || '0') + '%'
-            }
-          </div>
-          {currentWeek > 0 && weeklyStats[Math.max(0, currentWeek - 1)] && (
-            <div className="mt-2">
-              <div className="w-full bg-gray-200 rounded-full h-1.5">
-                <div 
-                  className="bg-blue-500 rounded-full h-1.5 transition-all duration-300"
-                  style={{ 
-                    width: `${weeklyStats[Math.max(0, currentWeek - 1)].completionRate}%` 
-                  }}
-                ></div>
+        <h1 className="text-2xl font-bold text-gray-900">Workouts</h1>
+        <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-600">{users.filter(u => u.isActive).length} active</span>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {weeklyStats[Math.max(0, currentWeek - 1)].totalWorkoutsCompleted}/
-                {weeklyStats[Math.max(0, currentWeek - 1)].totalWorkoutsRequired} workouts completed
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-600">
+                  {currentWeek <= 0
+                    ? `Starts in ${getDaysUntilStart(adminSettings.challengeStartDate)} days`
+                    : `Week ${currentWeek}`
+                  }
+                </span>
               </div>
             </div>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <div className="flex items-center space-x-3 mb-2">
-            <CheckCircle className="w-6 h-6 text-purple-500" />
-            <h3 className="font-medium text-gray-900">Challenge Status</h3>
-          </div>
-          <div className="text-sm font-bold text-purple-600">
-            {adminSettings.isActive ? 'ACTIVE' : 'INACTIVE'}
+            {currentWeek > 0 && weeklyStats[Math.max(0, currentWeek - 1)] && (
+              <span className="text-sm font-medium text-gray-900">
+                {weeklyStats[Math.max(0, currentWeek - 1)].completionRate.toFixed(0)}% complete
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* 2. Week Selector */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Select Week to Manage</h2>
-        <div className="flex flex-wrap gap-2">
-          {weeks.slice(0, 12).map((week) => {
-            const stats = weeklyStats[week - 1];
-            const isCurrent = currentWeek > 0 && week === currentWeek;
-            
-            return (
-              <button
-                key={week}
-                onClick={() => setSelectedWeek(week)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  selectedWeek === week
-                    ? 'bg-primary-500 text-white'
-                    : isCurrent
-                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                Week {week}
-                {isCurrent && <span className="ml-1 text-xs">(Current)</span>}
-                <div className="text-xs mt-1">
-                  {stats.completedUsers}/{stats.totalUsers}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 3. Workout Tracking Grid */}
-      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-2">
+      {/* Workout Tracking Grid */}
+      <div className="bg-white rounded-xl p-4 border border-gray-100">
+        {/* Week Selector Header */}
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Week {selectedWeek} Workout Tracking
+            Week {selectedWeek}
           </h2>
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-            <span className="text-xs text-blue-600">Database Connected</span>
+          <div className="relative">
+            <select
+              value={selectedWeek}
+              onChange={(e) => setSelectedWeek(Number(e.target.value))}
+              className="appearance-none bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
+            >
+              {weeks.map((week) => {
+                const stats = weeklyStats[week - 1];
+                const isCurrent = currentWeek > 0 && week === currentWeek;
+                return (
+                  <option key={week} value={week}>
+                    Week {week}{isCurrent ? ' (Current)' : ''} - {stats.completedUsers}/{stats.totalUsers}
+                  </option>
+                );
+              })}
+            </select>
+            <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
         </div>
 
@@ -425,45 +366,6 @@ const Workout: React.FC<WorkoutProps> = ({
         </div>
       </div>
 
-      {/* 4. Weekly Progress Summary */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Weekly Progress Summary</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {weeklyStats.slice(0, 8).map((stats) => (
-            <div
-              key={stats.week}
-              className={`p-4 rounded-lg border ${
-                stats.week === currentWeek
-                  ? 'border-blue-200 bg-blue-50'
-                  : 'border-gray-200 bg-gray-50'
-              }`}
-            >
-              <div className="text-center">
-                <div className="text-lg font-bold text-gray-900">Week {stats.week}</div>
-                <div className="text-sm text-gray-600 mb-2">
-                  {stats.completedUsers}/{stats.totalUsers} users met goals
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-green-500 rounded-full h-2 transition-all duration-300"
-                    style={{ width: `${stats.completionRate}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {stats.completionRate.toFixed(0)}% ({stats.totalWorkoutsCompleted}/{stats.totalWorkoutsRequired})
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        
-        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-800">
-            💡 <strong>Smart Calculation:</strong> Completion % accounts for individual consistency levels 
-            (5 days/week = 5 required, 4 days/week = 4 required, etc.)
-          </p>
-        </div>
-      </div>
     </div>
   );
 };

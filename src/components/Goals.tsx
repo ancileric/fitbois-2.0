@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Goal, GOAL_CATEGORIES, GoalCategory } from '../types';
-import { Target, AlertCircle, Trash2 } from 'lucide-react';
+import { Target, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
 
 interface GoalsProps {
   user: User;
@@ -14,11 +15,30 @@ interface GoalsProps {
 const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGoal, onDeleteGoal }) => {
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [newGoal, setNewGoal] = useState({
     category: 'cardio' as GoalCategory,
     description: '',
     isDifficult: false,
   });
+
+  const toggleUserExpanded = (userId: string) => {
+    setExpandedUsers(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
 
   // Group goals by user (sorted alphabetically)
   const goalsByUser = users.sort((a, b) => a.name.localeCompare(b.name)).map(user => {
@@ -81,102 +101,96 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Goals Management</h1>
-        <p className="text-gray-600 mt-1">
-          Track goals for all participants. Each user needs 5 goals (one per category) with at least one difficult goal.
-        </p>
+        <h1 className="text-2xl font-bold text-gray-900">Goals</h1>
       </div>
 
-      {/* Goals by User - Compact Format */}
-      <div className="space-y-8">
+      {/* Goals by User - Accordion Format */}
+      <div className="space-y-3">
         {goalsByUser.map((userGoals) => {
           const { user, activeGoals, completedGoals, missingCategories, hasAllCategories, needsDifficultGoal } = userGoals;
-          
+          const isExpanded = expandedUsers.has(user.id);
+
           return (
-            <div key={user.id} className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
-              {/* User Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
-                <div className="flex items-center space-x-3 sm:space-x-4">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary-500 text-white rounded-full flex items-center justify-center text-base sm:text-lg">
+            <div key={user.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              {/* User Header - Clickable */}
+              <button
+                onClick={() => toggleUserExpanded(user.id)}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center text-sm">
                     {user.avatar || user.name.charAt(0)}
                   </div>
                   <div>
-                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900">{user.name}</h2>
-                    <p className="text-xs sm:text-sm text-gray-500">
-                      {activeGoals.length}/5 active goals • {completedGoals.length} completed
+                    <h2 className="font-semibold text-gray-900">{user.name}</h2>
+                    <p className="text-xs text-gray-500">
+                      {activeGoals.length}/5 goals • {completedGoals.length} completed
                     </p>
                   </div>
                 </div>
 
-                {/* Status Indicators and Actions */}
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2">
+                  {/* Status Indicators */}
                   {hasAllCategories ? (
-                    <span className="px-2 sm:px-3 py-1 bg-green-100 text-green-800 text-xs sm:text-sm font-medium rounded-full">
-                      ✅ All Categories
+                    <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                      Complete
                     </span>
                   ) : (
-                    <span className="px-2 sm:px-3 py-1 bg-yellow-100 text-yellow-800 text-xs sm:text-sm font-medium rounded-full">
-                      {missingCategories.length} Missing
+                    <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">
+                      {missingCategories.length} missing
                     </span>
                   )}
 
                   {needsDifficultGoal && (
-                    <span className="px-2 sm:px-3 py-1 bg-orange-100 text-orange-800 text-xs sm:text-sm font-medium rounded-full">
-                      ⚠️ Need Difficult
+                    <span className="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded-full">
+                      ⚠️
                     </span>
                   )}
 
-                  {(activeGoals.length > 0 || completedGoals.length > 0) && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Are you sure you want to delete ALL goals for ${user.name}? This action cannot be undone.`)) {
-                          [...activeGoals, ...completedGoals].forEach(goal => onDeleteGoal(goal.id));
-                        }
-                      }}
-                      className="px-2 sm:px-3 py-1 bg-red-100 text-red-800 text-xs sm:text-sm font-medium rounded-full hover:bg-red-200 flex items-center space-x-1"
-                    >
-                      <Trash2 size={12} />
-                      <span>Clear All</span>
-                    </button>
+                  {isExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-gray-400" />
                   )}
                 </div>
-              </div>
+              </button>
 
-              {/* Alerts for this user */}
-              {(needsDifficultGoal || !hasAllCategories) && (
-                <div className="mb-6 space-y-2">
-                  {needsDifficultGoal && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <div className="flex items-start space-x-2">
-                        <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5" />
-                        <p className="text-sm text-orange-700">
-                          <strong>{user.name}</strong> needs at least one difficult goal.
-                        </p>
-                      </div>
+              {/* Expandable Content */}
+              {isExpanded && (
+                <div className="px-4 pb-4 border-t border-gray-100">
+                  {/* Alerts for this user */}
+                  {(needsDifficultGoal || !hasAllCategories) && (
+                    <div className="mt-3 space-y-2">
+                      {needsDifficultGoal && (
+                        <div className="bg-orange-50 border border-orange-100 rounded-lg p-2">
+                          <div className="flex items-center space-x-2">
+                            <AlertCircle className="w-4 h-4 text-orange-500" />
+                            <p className="text-xs text-orange-700">
+                              Needs at least one difficult goal
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!hasAllCategories && (
+                        <div className="bg-blue-50 border border-blue-100 rounded-lg p-2">
+                          <div className="flex items-center space-x-2">
+                            <Target className="w-4 h-4 text-blue-500" />
+                            <p className="text-xs text-blue-700">
+                              Missing: {missingCategories.map(c => c.name).join(', ')}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
-                  
-                  {!hasAllCategories && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <div className="flex items-start space-x-2">
-                        <Target className="w-4 h-4 text-blue-500 mt-0.5" />
-                        <p className="text-sm text-blue-700">
-                          <strong>{user.name}</strong> missing categories: {missingCategories.map(c => c.name).join(', ')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {/* Compact 5-Row Goals Format */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-medium text-gray-900">Goals (5 Categories)</h3>
-                <div className="space-y-2">
-                  {GOAL_CATEGORIES.map((category) => {
+                  {/* Goals List */}
+                  <div className="mt-3 space-y-2">
+                    {GOAL_CATEGORIES.map((category) => {
                     const goal = [...activeGoals, ...completedGoals].find(g => g.category === category.id);
 
                     return (
@@ -228,9 +242,15 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                                 )}
                                 <button
                                   onClick={() => {
-                                    if (window.confirm('Delete this goal?')) {
-                                      onDeleteGoal(goal.id);
-                                    }
+                                    setConfirmDialog({
+                                      isOpen: true,
+                                      title: 'Delete Goal',
+                                      message: `Are you sure you want to delete this ${category.name} goal?`,
+                                      onConfirm: () => {
+                                        onDeleteGoal(goal.id);
+                                        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                                      }
+                                    });
                                   }}
                                   className={`${goal.isCompleted ? 'flex-1' : ''} bg-red-500 text-white px-2 py-1.5 rounded text-xs hover:bg-red-600`}
                                 >
@@ -296,9 +316,15 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                                 )}
                                 <button
                                   onClick={() => {
-                                    if (window.confirm('Delete this goal?')) {
-                                      onDeleteGoal(goal.id);
-                                    }
+                                    setConfirmDialog({
+                                      isOpen: true,
+                                      title: 'Delete Goal',
+                                      message: `Are you sure you want to delete this ${category.name} goal?`,
+                                      onConfirm: () => {
+                                        onDeleteGoal(goal.id);
+                                        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                                      }
+                                    });
                                   }}
                                   className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
                                 >
@@ -321,9 +347,10 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                         </div>
                       </div>
                     );
-                  })}
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
@@ -417,6 +444,17 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel="Delete"
+        isDestructive={true}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

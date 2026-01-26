@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { User, Goal, WeeklyUpdate, Proof, WorkoutDay } from '../types';
 import { getCurrentWeek, getChallengeProgress, getDaysUntilStart } from '../utils/dateUtils';
-import { Calendar, Target, Trophy, Users, AlertCircle, ChevronDown } from 'lucide-react';
+import { Calendar, Users, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface DashboardProps {
   currentUser: User;
@@ -38,27 +38,21 @@ interface HeatmapMonth {
   width: number;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ 
-  currentUser, 
-  users, 
-  goals, 
-  weeklyUpdates, 
+const Dashboard: React.FC<DashboardProps> = ({
+  currentUser,
+  users,
+  goals,
+  weeklyUpdates,
   proofs,
   workoutDays
 }) => {
   const [selectedHeatmapUser, setSelectedHeatmapUser] = useState<string>(users[0]?.id || '');
+  const [showHeatmap, setShowHeatmap] = useState(false);
   
   // Calculate current week and challenge progress
   const currentWeek = getCurrentWeek();
-  const { daysPassed, totalDays, progressPercentage } = getChallengeProgress();
-  
-  // Calculate challenge-wide statistics
-  const totalGoalsCompleted = goals.filter(g => g.isCompleted).length;
+  const { progressPercentage } = getChallengeProgress();
   const activeParticipants = users.filter(u => u.isActive).length;
-  const totalWorkoutsThisWeek = workoutDays.filter(w => w.week === currentWeek && w.isCompleted).length;
-  
-  // Calculate total required workouts for this week
-  const totalRequiredThisWeek = users.filter(u => u.isActive).reduce((sum, user) => sum + user.currentConsistencyLevel, 0);
 
   // Calculate leaderboard data
   const leaderboardData = useMemo(() => {
@@ -87,37 +81,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (b.consistencyScore !== a.consistencyScore) return b.consistencyScore - a.consistencyScore;
         return a.name.localeCompare(b.name); // Alphabetical tiebreaker
       });
-  }, [users, goals]);
-
-  // Identify participants at risk
-  const participantsAtRisk = useMemo(() => {
-    const atRisk = users.filter(u => u.isActive).filter(user => {
-      const userGoals = goals.filter(g => g.userId === user.id);
-      const difficultGoals = userGoals.filter(g => g.isDifficult && !g.isCompleted);
-      // Note: missingCategories can be used for future risk factor analysis
-      // const missingCategories = GOAL_CATEGORIES.length - new Set(userGoals.map(g => g.category)).size;
-
-      return (
-        // Risk Factor 1: Elimination danger (1+ missed weeks at 5-day level)
-        (user.currentConsistencyLevel === 5 && user.missedWeeks >= 1) ||
-        
-        // Risk Factor 2: Multiple missed weeks (any level)
-        user.missedWeeks >= 2 ||
-        
-        // Risk Factor 3: No goals set up yet
-        userGoals.length === 0 ||
-        
-        // Risk Factor 4: Incomplete goal set (less than 5 goals)
-        (userGoals.length > 0 && userGoals.length < 5) ||
-        
-        // Risk Factor 5: Missing difficult goal (has goals but none are difficult)
-        (userGoals.length > 0 && difficultGoals.length === 0)
-        
-        // Removed "No completed goals yet" risk factor - not a real risk
-      );
-    });
-    
-    return atRisk;
   }, [users, goals]);
 
   // Get bottom 2 performers for risk highlighting
@@ -231,105 +194,39 @@ const Dashboard: React.FC<DashboardProps> = ({
     return { weeks, months };
   }, [selectedHeatmapUser, users, workoutDays, goals]);
 
-  // Overview stats for the challenge
-  const overviewStats = [
-    {
-      title: 'Current Week',
-      value: currentWeek > 0 ? currentWeek : 'Not Started',
-      subtitle: currentWeek > 0 ? `Week ${currentWeek} of challenge` : getDaysUntilStart() > 0 ? `Starts in ${getDaysUntilStart()} days` : 'Starting today!',
-      icon: Calendar,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-    },
-    {
-      title: 'Active Participants',
-      value: activeParticipants,
-      total: users.length,
-      subtitle: `${users.length - activeParticipants} eliminated`,
-      icon: Users,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
-    },
-    {
-      title: 'Total Goals Completed',
-      value: totalGoalsCompleted,
-      subtitle: `Across all participants`,
-      icon: Trophy,
-      color: 'text-yellow-600',
-      bgColor: 'bg-yellow-50',
-    },
-    {
-      title: 'This Week\'s Progress',
-      value: totalRequiredThisWeek > 0 ? `${Math.round((totalWorkoutsThisWeek / totalRequiredThisWeek) * 100)}%` : '0%',
-      subtitle: `${totalWorkoutsThisWeek}/${totalRequiredThisWeek} workouts`,
-      icon: Target,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50',
-    },
-  ];
-
   return (
-    <div className="space-y-8">
-      {/* 1. Challenge Overview */}
-      <div className="bg-gradient-to-r from-primary-500 to-primary-700 rounded-xl p-4 md:p-6 text-white">
-        <h1 className="text-2xl md:text-3xl font-bold mb-2">FitBois 2.0 Dashboard 💪</h1>
-        <p className="text-primary-100 mb-4 text-sm md:text-base">
-          Challenge overview and participant tracking
-        </p>
-        
-        <div className="bg-white/10 rounded-lg p-4">
+    <div className="space-y-6">
+      {/* Header with Progress */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">Challenge Progress</span>
-            <span className="text-sm">{Math.round(progressPercentage)}% Complete</span>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-600">
+                  {currentWeek > 0 ? `Week ${currentWeek}` : getDaysUntilStart() > 0 ? `Starts in ${getDaysUntilStart()} days` : 'Starting today'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-600">{activeParticipants} active</span>
+              </div>
+            </div>
+            <span className="text-sm font-medium text-gray-900">{Math.round(progressPercentage)}%</span>
           </div>
-          <div className="w-full bg-white/20 rounded-full h-2">
-            <div 
-              className="bg-white rounded-full h-2 transition-all duration-300"
+          <div className="w-full bg-gray-100 rounded-full h-2">
+            <div
+              className="bg-primary-500 rounded-full h-2 transition-all duration-300"
               style={{ width: `${progressPercentage}%` }}
             ></div>
           </div>
-          <p className="text-xs text-primary-100 mt-2">
-            {daysPassed <= 0 
-              ? `Challenge starts today! • Ends July 31, 2026`
-              : `Day ${daysPassed} of ${totalDays} • Ends July 31, 2026`
-            }
-          </p>
         </div>
       </div>
 
-      {/* Overview Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {overviewStats.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <div key={index} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 rounded-lg ${stat.bgColor}`}>
-                  <Icon className={`w-6 h-6 ${stat.color}`} />
-                </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">{stat.title}</h3>
-                <div className="flex items-baseline space-x-2">
-                  <span className="text-2xl font-bold text-gray-900">
-                    {stat.value}
-                  </span>
-                  {stat.total && (
-                    <span className="text-sm text-gray-500">/ {stat.total}</span>
-                  )}
-                </div>
-                {stat.subtitle && (
-                  <p className="text-sm text-gray-500 mt-1">{stat.subtitle}</p>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 2. Leaderboard - All Users */}
-      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-        <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4 md:mb-6">Leaderboard</h2>
+      {/* Leaderboard */}
+      <div className="bg-white rounded-xl p-4 border border-gray-100">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Leaderboard</h2>
         <div className="space-y-3">
           {leaderboardData.map((user, index) => {
             const isAtRisk = bottomPerformers.includes(user.id);
@@ -428,78 +325,40 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 3. Participants at Risk */}
-      {participantsAtRisk.length > 0 && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-red-200">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center space-x-2">
-            <AlertCircle className="w-6 h-6 text-red-500" />
-            <span>Participants at Risk</span>
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {participantsAtRisk.map((user) => {
-              const userGoals = goals.filter(g => g.userId === user.id);
-              const difficultGoals = userGoals.filter(g => g.isDifficult && !g.isCompleted);
-              
-              return (
-                <div key={user.id} className="border border-red-200 rounded-lg p-4 bg-red-50">
-                  <div className="flex items-center space-x-3 mb-3">
-                    <div className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-sm">
-                      {user.avatar || user.name.charAt(0)}
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-red-900">{user.name}</h3>
-                      <p className="text-sm text-red-700">Level {user.currentConsistencyLevel}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1 text-sm text-red-800">
-                    {user.missedWeeks >= 2 && (
-                      <p>• {user.missedWeeks} missed weeks (concerning pattern)</p>
-                    )}
-                    {user.currentConsistencyLevel === 5 && user.missedWeeks >= 1 && (
-                      <p className="font-medium">⚠️ Close to elimination ({user.missedWeeks}/2 missed weeks)</p>
-                    )}
-                    {userGoals.length === 0 && (
-                      <p>• No goals set up yet</p>
-                    )}
-                    {userGoals.length > 0 && userGoals.length < 5 && (
-                      <p>• Incomplete goal set ({userGoals.length}/5 goals)</p>
-                    )}
-                    {userGoals.length > 0 && difficultGoals.length === 0 && (
-                      <p>• Missing difficult goal</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Activity Heatmap - Collapsible */}
+      <div className="bg-white rounded-xl border border-gray-100">
+        <button
+          onClick={() => setShowHeatmap(!showHeatmap)}
+          className="w-full p-4 flex items-center justify-between text-left"
+        >
+          <h2 className="text-lg font-semibold text-gray-900">Activity Heatmap</h2>
+          {showHeatmap ? (
+            <ChevronUp className="w-5 h-5 text-gray-400" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-gray-400" />
+          )}
+        </button>
 
-      {/* 4. User Activity Heatmap */}
-      <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-100">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
-          <h2 className="text-lg md:text-xl font-semibold text-gray-900">Activity Heatmap</h2>
+        {showHeatmap && (
+          <div className="px-4 pb-4">
+            {/* User Selector */}
+            <div className="relative mb-4">
+              <select
+                value={selectedHeatmapUser}
+                onChange={(e) => setSelectedHeatmapUser(e.target.value)}
+                className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 w-full sm:w-auto"
+              >
+                {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.avatar} {user.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
 
-          {/* User Selector */}
-          <div className="relative">
-            <select
-              value={selectedHeatmapUser}
-              onChange={(e) => setSelectedHeatmapUser(e.target.value)}
-              className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-primary-500 w-full sm:w-auto"
-            >
-              {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.avatar} {user.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          </div>
-        </div>
-
-        {/* GitHub-style Heatmap - Scrollable on mobile */}
-        <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+            {/* GitHub-style Heatmap - Scrollable on mobile */}
+            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
           <div style={{ minWidth: '600px' }}>
             {/* Month headers - distributed across full width */}
             <div className="flex mb-3 w-full">
@@ -605,24 +464,26 @@ const Dashboard: React.FC<DashboardProps> = ({
           </span>
         </div>
 
-        {/* Legend */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-4 md:mt-6 pt-4 border-t gap-3">
-          <div className="flex items-center space-x-2 md:space-x-4 text-xs md:text-sm">
-            <span className="text-gray-600">Less</span>
-            <div className="flex items-center space-x-0.5 md:space-x-1">
-              <div className="w-3 h-3 md:w-4 md:h-4 bg-gray-100 border border-gray-200 rounded-sm"></div>
-              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-200 border border-green-300 rounded-sm"></div>
-              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-300 border border-green-400 rounded-sm"></div>
-              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-500 border border-green-600 rounded-sm"></div>
-              <div className="w-3 h-3 md:w-4 md:h-4 bg-green-600 border border-green-700 rounded-sm"></div>
+            {/* Legend */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-4 pt-4 border-t gap-3">
+              <div className="flex items-center space-x-2 text-xs">
+                <span className="text-gray-600">Less</span>
+                <div className="flex items-center space-x-0.5">
+                  <div className="w-3 h-3 bg-gray-100 border border-gray-200 rounded-sm"></div>
+                  <div className="w-3 h-3 bg-green-200 border border-green-300 rounded-sm"></div>
+                  <div className="w-3 h-3 bg-green-300 border border-green-400 rounded-sm"></div>
+                  <div className="w-3 h-3 bg-green-500 border border-green-600 rounded-sm"></div>
+                  <div className="w-3 h-3 bg-green-600 border border-green-700 rounded-sm"></div>
+                </div>
+                <span className="text-gray-600">More</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-green-400 border-2 border-yellow-400 rounded-sm"></div>
+                <span className="text-gray-600 text-xs">Goal completed</span>
+              </div>
             </div>
-            <span className="text-gray-600">More</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 md:w-4 md:h-4 bg-green-400 border-2 border-yellow-400 rounded-sm"></div>
-            <span className="text-gray-600 text-xs md:text-sm">Goal completed</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

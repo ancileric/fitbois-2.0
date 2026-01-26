@@ -1,16 +1,14 @@
 import React, { useState } from 'react';
 import { User, WorkoutDay, AdminSettings } from '../types';
-// Date utilities moved to Workout component
-// Database operations are handled through the API service
-import { 
-  CheckCircle, 
-  Users, 
+import {
+  Users,
   Edit,
   Trash2,
   UserPlus,
-  Download,
   RotateCcw
 } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './ToastContext';
 
 interface AdminProps {
   users: User[];
@@ -29,14 +27,17 @@ const Admin: React.FC<AdminProps> = ({
   adminSettings,
   onUpdateUser,
   onDeleteUser,
-  onUpdateWorkoutDay,
-  onUpdateAdminSettings,
   onRecalculateConsistency,
 }) => {
+  const { showToast } = useToast();
   const [showAddUser, setShowAddUser] = useState(false);
-  const [showUsersTable, setShowUsersTable] = useState(false);
-  const [showWorkoutStats, setShowWorkoutStats] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [newUser, setNewUser] = useState({
     name: '',
     avatar: '',
@@ -138,65 +139,40 @@ const Admin: React.FC<AdminProps> = ({
 
   // Delete user (deactivate)
   const handleDeactivateUser = (user: User) => {
-    if (window.confirm(`Are you sure you want to remove ${user.name} from the challenge? This will delete all their data.`)) {
-      onDeleteUser(user.id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Remove Participant',
+      message: `Are you sure you want to remove ${user.name} from the challenge? This will delete all their data.`,
+      onConfirm: () => {
+        onDeleteUser(user.id);
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Weekly stats calculations moved to Workout component
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-          <p className="text-gray-600 mt-1 text-sm md:text-base">
-            Manage participants and track weekly workouts
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowUsersTable(!showUsersTable)}
-            className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-1 md:space-x-2"
-            title="Manage Users"
-          >
-            <Users size={18} />
-            <span className="hidden sm:inline">Users</span>
-          </button>
-          <button
-            onClick={() => setShowWorkoutStats(!showWorkoutStats)}
-            className="bg-purple-500 text-white px-3 py-2 rounded-lg hover:bg-purple-600 flex items-center space-x-1 md:space-x-2"
-            title="Workout Stats"
-          >
-            <CheckCircle size={18} />
-            <span className="hidden sm:inline">Stats</span>
-          </button>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Admin</h1>
+        <div className="flex gap-2">
           <button
             onClick={() => setShowAddUser(true)}
-            className="bg-primary-500 text-white px-3 py-2 rounded-lg hover:bg-primary-600 flex items-center space-x-1 md:space-x-2"
-            title="Add User"
+            className="bg-primary-500 text-white px-3 py-2 rounded-lg hover:bg-primary-600 flex items-center space-x-2"
           >
             <UserPlus size={18} />
-            <span className="hidden sm:inline">Add</span>
-          </button>
-          <button
-            onClick={() => alert('Database export feature coming soon!')}
-            className="bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 flex items-center space-x-1 md:space-x-2"
-            title="Export Database"
-          >
-            <Download size={18} />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline">Add User</span>
           </button>
           <button
             onClick={() => {
               if (onRecalculateConsistency) {
                 onRecalculateConsistency();
-                alert('Consistency metrics recalculated for all users!');
+                showToast('Consistency metrics recalculated', 'success');
               }
             }}
-            className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center space-x-1 md:space-x-2"
-            title="Recalculate Consistency"
+            className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 flex items-center space-x-2"
           >
             <RotateCcw size={18} />
             <span className="hidden sm:inline">Recalc</span>
@@ -204,30 +180,8 @@ const Admin: React.FC<AdminProps> = ({
         </div>
       </div>
 
-      {/* Data Status */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex items-center space-x-2">
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-          <p className="text-sm text-blue-800">
-            🗄️ Data is stored in SQLite database: <code className="bg-blue-100 px-1 rounded">backend/database/fitbois.db</code>
-          </p>
-        </div>
-      </div>
-
-
-      {/* Users Management Table */}
-      {showUsersTable && (
-        <div className="bg-white rounded-xl p-4 md:p-6 shadow-sm border border-gray-200">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900">Users Management</h2>
-            <button
-              onClick={() => setShowAddUser(true)}
-              className="bg-primary-500 text-white px-3 py-2 rounded-lg hover:bg-primary-600 flex items-center justify-center space-x-2 w-full sm:w-auto"
-            >
-              <UserPlus size={18} />
-              <span>Add New User</span>
-            </button>
-          </div>
+      {/* Users Table - Always visible */}
+      <div className="bg-white rounded-xl p-4 border border-gray-100">
 
           {/* Mobile Card View */}
           <div className="md:hidden space-y-3">
@@ -398,76 +352,6 @@ const Admin: React.FC<AdminProps> = ({
             </div>
           )}
         </div>
-      )}
-
-      {/* Workout Statistics */}
-      {showWorkoutStats && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Workout Statistics</h2>
-          
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {users.filter(u => u.isActive).sort((a, b) => a.name.localeCompare(b.name)).map((user) => {
-              const userWorkouts = workoutDays.filter(w => w.userId === user.id);
-              const completedWorkouts = userWorkouts.filter(w => w.isCompleted).length;
-              const totalWorkouts = userWorkouts.length;
-              const completionRate = totalWorkouts > 0 ? Math.round((completedWorkouts / totalWorkouts) * 100) : 0;
-              const weeksWithData = new Set(userWorkouts.map(w => w.week)).size;
-              
-              return (
-                <div key={user.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center">
-                      {user.avatar || user.name.charAt(0)}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{user.name}</h3>
-                      <p className="text-sm text-gray-500">Level {user.currentConsistencyLevel}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="text-center p-2 bg-green-50 rounded">
-                      <div className="text-lg font-bold text-green-600">{completedWorkouts}</div>
-                      <div className="text-green-700">Completed</div>
-                    </div>
-                    <div className="text-center p-2 bg-blue-50 rounded">
-                      <div className="text-lg font-bold text-blue-600">{completionRate}%</div>
-                      <div className="text-blue-700">Success Rate</div>
-                    </div>
-                    <div className="text-center p-2 bg-purple-50 rounded">
-                      <div className="text-lg font-bold text-purple-600">{weeksWithData}</div>
-                      <div className="text-purple-700">Weeks Active</div>
-                    </div>
-                    <div className="text-center p-2 bg-gray-50 rounded">
-                      <div className="text-lg font-bold text-gray-600">{totalWorkouts}</div>
-                      <div className="text-gray-700">Total Days</div>
-                    </div>
-                  </div>
-                  
-                  {completionRate > 0 && (
-                    <div className="mt-3">
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-green-500 rounded-full h-2 transition-all duration-300"
-                          style={{ width: `${completionRate}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          
-          {users.filter(u => u.isActive).length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <CheckCircle className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-              <p>No active users found.</p>
-            </div>
-          )}
-        </div>
-      )}
-
 
       {/* Add/Edit User Modal */}
       {showAddUser && (
@@ -611,6 +495,17 @@ const Admin: React.FC<AdminProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel="Remove"
+        isDestructive={true}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

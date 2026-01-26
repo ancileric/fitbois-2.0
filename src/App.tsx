@@ -6,6 +6,8 @@ import Dashboard from './components/Dashboard';
 import Goals from './components/Goals';
 import Admin from './components/Admin';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider, useToast } from './components/ToastContext';
+import Toast from './components/Toast';
 import { generateMockData } from './utils/mockData';
 import { apiService } from './services/api';
 import { updateAllUsersConsistency } from './utils/consistencyCalculator';
@@ -13,7 +15,8 @@ import { getCurrentWeek } from './utils/dateUtils';
 
 type ActiveView = 'workout' | 'goals' | 'dashboard' | 'admin';
 
-function App() {
+function AppContent() {
+  const { showToast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([]);
@@ -181,7 +184,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error saving user:', error);
-      alert(`Failed to save user: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(`Failed to save user: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
   };
 
@@ -196,7 +199,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error saving goal to database:', error);
-      alert(`Failed to save goal: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(`Failed to save goal: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
   };
 
@@ -220,7 +223,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error updating goal in database:', error);
-      alert(`Failed to update goal: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(`Failed to update goal: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
   };
 
@@ -235,7 +238,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error deleting goal from database:', error);
-      alert(`Failed to delete goal: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(`Failed to delete goal: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
   };
 
@@ -280,7 +283,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error saving workout to database:', error);
-      alert('Failed to save workout data. Please try again.');
+      showToast('Failed to save workout data. Please try again.', 'error');
     }
   };
 
@@ -307,7 +310,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error deleting user from database:', error);
-      alert('Failed to delete user. Please try again.');
+      showToast('Failed to delete user. Please try again.', 'error');
     }
   };
 
@@ -329,7 +332,7 @@ function App() {
         onViewChange={setActiveView}
       />
       
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
         <ErrorBoundary>
           {activeView === 'workout' && (
             <Workout
@@ -376,7 +379,16 @@ function App() {
           )}
         </ErrorBoundary>
       </main>
+      <Toast />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
 
