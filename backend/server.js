@@ -112,7 +112,7 @@ const validateConsistencyLevel = (value) => {
 };
 
 const validateGoalCategory = (value) => {
-  const validCategories = ['cardio', 'strength', 'consistency', 'sports', 'personal'];
+  const validCategories = ['cardio', 'strength', 'consistency', 'sports', 'personal-growth'];
   if (!validCategories.includes(value)) {
     return `Category must be one of: ${validCategories.join(', ')}`;
   }
