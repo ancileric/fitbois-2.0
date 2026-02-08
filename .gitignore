@@ -34,3 +34,10 @@ coverage/
 # Misc
 *.log
 .cache/
+
+# Database files and backups
+*.db-journal
+*.db-shm
+*.db-wal
+*backup*.db
+backups/

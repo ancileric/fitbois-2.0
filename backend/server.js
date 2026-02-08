@@ -35,13 +35,17 @@ if (isProduction) {
 }
 
 // Database connection
-const dbPath = path.join(__dirname, 'database', 'fitbois.db');
+const dbDir = path.join(__dirname, 'database');
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+const dbPath = path.join(dbDir, 'fitbois.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database:', err.message);
     process.exit(1);
   }
-  console.log('✅ Connected to SQLite database');
+  console.log('✅ Connected to SQLite database at:', dbPath);
 });
 
 // Enable foreign keys
@@ -995,6 +999,38 @@ app.get('/api/health', (req, res) => {
     database: 'SQLite',
     environment: isProduction ? 'production' : 'development',
     timestamp: new Date().toISOString()
+  });
+});
+
+// ==================== TEMPORARY BACKUP ENDPOINT ====================
+// ⚠️ SECURITY WARNING: This endpoint allows downloading the entire database
+// TODO: REMOVE THIS AFTER BACKING UP YOUR DATA!
+
+app.get('/api/admin/download-database', (req, res) => {
+  const dbPath = path.join(__dirname, 'database', 'fitbois.db');
+  
+  // Check if database exists
+  if (!fs.existsSync(dbPath)) {
+    return res.status(404).json({ 
+      error: 'Database file not found',
+      path: dbPath 
+    });
+  }
+  
+  // Get file stats
+  const stats = fs.statSync(dbPath);
+  const fileSizeKB = (stats.size / 1024).toFixed(2);
+  
+  console.log(`📥 Database download requested - Size: ${fileSizeKB} KB`);
+  
+  // Send the file
+  res.download(dbPath, 'fitbois-railway-backup.db', (err) => {
+    if (err) {
+      console.error('Error downloading database:', err);
+      res.status(500).json({ error: 'Error downloading database' });
+    } else {
+      console.log('✅ Database downloaded successfully');
+    }
   });
 });
 
