@@ -1,17 +1,17 @@
-import React from 'react';
-import { CheckCircle, XCircle, Info, X } from 'lucide-react';
-import { useToast, ToastType } from './ToastContext';
+import React from "react";
+import { CheckCircle, XCircle, Info, X } from "lucide-react";
+import { useToast, ToastType } from "./ToastContext";
 
 const Toast: React.FC = () => {
   const { toasts, removeToast } = useToast();
 
   const getIcon = (type: ToastType) => {
     switch (type) {
-      case 'success':
+      case "success":
         return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'error':
+      case "error":
         return <XCircle className="w-5 h-5 text-red-500" />;
-      case 'info':
+      case "info":
       default:
         return <Info className="w-5 h-5 text-blue-500" />;
     }
@@ -19,13 +19,13 @@ const Toast: React.FC = () => {
 
   const getStyles = (type: ToastType) => {
     switch (type) {
-      case 'success':
-        return 'bg-green-50 border-green-200 text-green-800';
-      case 'error':
-        return 'bg-red-50 border-red-200 text-red-800';
-      case 'info':
+      case "success":
+        return "bg-green-50 border-green-200 text-green-800";
+      case "error":
+        return "bg-red-50 border-red-200 text-red-800";
+      case "info":
       default:
-        return 'bg-blue-50 border-blue-200 text-blue-800';
+        return "bg-blue-50 border-blue-200 text-blue-800";
     }
   };
 
@@ -33,7 +33,7 @@ const Toast: React.FC = () => {
 
   return (
     <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-sm px-4">
-      {toasts.map(toast => (
+      {toasts.map((toast) => (
         <div
           key={toast.id}
           className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg animate-slide-down ${getStyles(toast.type)}`}

@@ -1,5 +1,5 @@
-import React from 'react';
-import { AlertTriangle } from 'lucide-react';
+import React from "react";
+import { AlertTriangle } from "lucide-react";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -16,8 +16,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
   title,
   message,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
   isDestructive = false,
   onConfirm,
   onCancel,
@@ -50,8 +50,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onConfirm}
             className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
               isDestructive
-                ? 'bg-red-500 text-white hover:bg-red-600'
-                : 'bg-primary-500 text-white hover:bg-primary-600'
+                ? "bg-red-500 text-white hover:bg-red-600"
+                : "bg-primary-500 text-white hover:bg-primary-600"
             }`}
           >
             {confirmLabel}

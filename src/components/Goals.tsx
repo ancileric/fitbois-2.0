@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { User, Goal, GOAL_CATEGORIES, GoalCategory } from '../types';
-import { Target, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import ConfirmDialog from './ConfirmDialog';
+import React, { useState } from "react";
+import { User, Goal, GOAL_CATEGORIES, GoalCategory } from "../types";
+import { Target, AlertCircle, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import ConfirmDialog from "./ConfirmDialog";
 
 interface GoalsProps {
   user: User;
@@ -12,24 +12,37 @@ interface GoalsProps {
   onDeleteGoal: (goalId: string) => void;
 }
 
-const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGoal, onDeleteGoal }) => {
+const Goals: React.FC<GoalsProps> = ({
+  user,
+  users,
+  goals,
+  onAddGoal,
+  onUpdateGoal,
+  onDeleteGoal,
+}) => {
   const [showAddGoal, setShowAddGoal] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [showEditGoal, setShowEditGoal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
     onConfirm: () => void;
-  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  }>({ isOpen: false, title: "", message: "", onConfirm: () => {} });
   const [newGoal, setNewGoal] = useState({
-    category: 'cardio' as GoalCategory,
-    description: '',
+    category: "cardio" as GoalCategory,
+    description: "",
+    isDifficult: false,
+  });
+  const [editGoalForm, setEditGoalForm] = useState({
+    description: "",
     isDifficult: false,
   });
 
   const toggleUserExpanded = (userId: string) => {
-    setExpandedUsers(prev => {
+    setExpandedUsers((prev) => {
       const next = new Set(prev);
       if (next.has(userId)) {
         next.delete(userId);
@@ -41,33 +54,38 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
   };
 
   // Group goals by user (sorted alphabetically)
-  const goalsByUser = users.sort((a, b) => a.name.localeCompare(b.name)).map(user => {
-    const userGoals = goals.filter(g => g.userId === user.id);
-    const activeGoals = userGoals.filter(g => !g.isCompleted);
-    const completedGoals = userGoals.filter(g => g.isCompleted);
-    const difficultGoals = activeGoals.filter(g => g.isDifficult);
-    
-    // Check which categories are covered
-    const coveredCategories = activeGoals.map(g => g.category);
-    const missingCategories = GOAL_CATEGORIES.filter(c => !coveredCategories.includes(c.id as GoalCategory));
-    
-    return {
-      user,
-      activeGoals,
-      completedGoals,
-      difficultGoals,
-      totalGoals: userGoals.length,
-      missingCategories,
-      hasAllCategories: missingCategories.length === 0,
-      needsDifficultGoal: activeGoals.length > 0 && difficultGoals.length === 0,
-    };
-  });
+  const goalsByUser = users
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((user) => {
+      const userGoals = goals.filter((g) => g.userId === user.id);
+      const activeGoals = userGoals.filter((g) => !g.isCompleted);
+      const completedGoals = userGoals.filter((g) => g.isCompleted);
+      const difficultGoals = activeGoals.filter((g) => g.isDifficult);
+
+      // Check which categories are covered
+      const coveredCategories = activeGoals.map((g) => g.category);
+      const missingCategories = GOAL_CATEGORIES.filter(
+        (c) => !coveredCategories.includes(c.id as GoalCategory),
+      );
+
+      return {
+        user,
+        activeGoals,
+        completedGoals,
+        difficultGoals,
+        totalGoals: userGoals.length,
+        missingCategories,
+        hasAllCategories: missingCategories.length === 0,
+        needsDifficultGoal:
+          activeGoals.length > 0 && difficultGoals.length === 0,
+      };
+    });
 
   const handleCompleteGoal = (goal: Goal) => {
     const updatedGoal = {
       ...goal,
       isCompleted: true,
-      completedDate: new Date().toISOString().split('T')[0],
+      completedDate: new Date().toISOString().split("T")[0],
     };
     onUpdateGoal(updatedGoal);
   };
@@ -75,8 +93,11 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
   const handleAddGoal = () => {
     if (!newGoal.description.trim() || !selectedUserId) return;
 
-    console.log('🎯 Creating goal for user:', selectedUserId);
-    console.log('👥 Available users:', users.map(u => ({ id: u.id, name: u.name })));
+    console.log("🎯 Creating goal for user:", selectedUserId);
+    console.log(
+      "👥 Available users:",
+      users.map((u) => ({ id: u.id, name: u.name })),
+    );
 
     const goal: Goal = {
       id: `goal-${Date.now()}`,
@@ -89,15 +110,52 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
       createdDate: new Date().toISOString(),
     };
 
-    console.log('📝 Goal data being sent:', goal);
+    console.log("📝 Goal data being sent:", goal);
     onAddGoal(goal);
     setNewGoal({
-      category: 'cardio',
-      description: '',
+      category: "cardio",
+      description: "",
       isDifficult: false,
     });
-    setSelectedUserId('');
+    setSelectedUserId("");
     setShowAddGoal(false);
+  };
+
+  const handleEditGoal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setEditGoalForm({
+      description: goal.description,
+      isDifficult: goal.isDifficult,
+    });
+    setShowEditGoal(true);
+  };
+
+  const handleSaveEditedGoal = () => {
+    if (!editingGoal || !editGoalForm.description.trim()) return;
+
+    const updatedGoal: Goal = {
+      ...editingGoal,
+      description: editGoalForm.description,
+      isDifficult: editGoalForm.isDifficult,
+    };
+
+    console.log("✏️ Updating goal:", updatedGoal);
+    onUpdateGoal(updatedGoal);
+    setShowEditGoal(false);
+    setEditingGoal(null);
+    setEditGoalForm({
+      description: "",
+      isDifficult: false,
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditGoal(false);
+    setEditingGoal(null);
+    setEditGoalForm({
+      description: "",
+      isDifficult: false,
+    });
   };
 
   return (
@@ -110,11 +168,21 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
       {/* Goals by User - Accordion Format */}
       <div className="space-y-3">
         {goalsByUser.map((userGoals) => {
-          const { user, activeGoals, completedGoals, missingCategories, hasAllCategories, needsDifficultGoal } = userGoals;
+          const {
+            user,
+            activeGoals,
+            completedGoals,
+            missingCategories,
+            hasAllCategories,
+            needsDifficultGoal,
+          } = userGoals;
           const isExpanded = expandedUsers.has(user.id);
 
           return (
-            <div key={user.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div
+              key={user.id}
+              className="bg-white rounded-xl border border-gray-100 overflow-hidden"
+            >
               {/* User Header - Clickable */}
               <button
                 onClick={() => toggleUserExpanded(user.id)}
@@ -127,7 +195,8 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                   <div>
                     <h2 className="font-semibold text-gray-900">{user.name}</h2>
                     <p className="text-xs text-gray-500">
-                      {activeGoals.length}/5 goals • {completedGoals.length} completed
+                      {activeGoals.length}/5 goals • {completedGoals.length}{" "}
+                      completed
                     </p>
                   </div>
                 </div>
@@ -180,7 +249,8 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                           <div className="flex items-center space-x-2">
                             <Target className="w-4 h-4 text-blue-500" />
                             <p className="text-xs text-blue-700">
-                              Missing: {missingCategories.map(c => c.name).join(', ')}
+                              Missing:{" "}
+                              {missingCategories.map((c) => c.name).join(", ")}
                             </p>
                           </div>
                         </div>
@@ -191,162 +261,216 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                   {/* Goals List */}
                   <div className="mt-3 space-y-2">
                     {GOAL_CATEGORIES.map((category) => {
-                    const goal = [...activeGoals, ...completedGoals].find(g => g.category === category.id);
+                      const goal = [...activeGoals, ...completedGoals].find(
+                        (g) => g.category === category.id,
+                      );
 
-                    return (
-                      <div key={category.id} className={`p-3 sm:p-4 rounded-lg border ${
-                        goal?.isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
-                      }`}>
-                        {/* Mobile Layout */}
-                        <div className="sm:hidden">
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-lg">{category.icon}</span>
-                              <div className="font-medium text-gray-900 text-sm">{category.name}</div>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {goal?.isDifficult && (
-                                <span className="px-1.5 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">
-                                  Difficult
-                                </span>
-                              )}
-                              {goal?.isCompleted && (
-                                <span className="px-1.5 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
-                                  ✅
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="mb-2">
-                            {goal ? (
-                              <div className="text-xs text-gray-600">{goal.description}</div>
-                            ) : (
-                              <div className="text-xs text-gray-400 italic">No goal set</div>
-                            )}
-                            {goal?.completedDate && (
-                              <div className="text-xs text-green-600 mt-1">
-                                Completed {new Date(goal.completedDate).toLocaleDateString()}
+                      return (
+                        <div
+                          key={category.id}
+                          className={`p-3 sm:p-4 rounded-lg border ${
+                            goal?.isCompleted
+                              ? "bg-green-50 border-green-200"
+                              : "bg-gray-50 border-gray-200"
+                          }`}
+                        >
+                          {/* Mobile Layout */}
+                          <div className="sm:hidden">
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-lg">{category.icon}</span>
+                                <div className="font-medium text-gray-900 text-sm">
+                                  {category.name}
+                                </div>
                               </div>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            {goal ? (
-                              <>
-                                {!goal.isCompleted && (
-                                  <button
-                                    onClick={() => handleCompleteGoal(goal)}
-                                    className="flex-1 bg-green-500 text-white px-2 py-1.5 rounded text-xs hover:bg-green-600"
-                                  >
-                                    Complete
-                                  </button>
+                              <div className="flex flex-wrap gap-1">
+                                {goal?.isDifficult && (
+                                  <span className="px-1.5 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                    Difficult
+                                  </span>
                                 )}
-                                <button
-                                  onClick={() => {
-                                    setConfirmDialog({
-                                      isOpen: true,
-                                      title: 'Delete Goal',
-                                      message: `Are you sure you want to delete this ${category.name} goal?`,
-                                      onConfirm: () => {
-                                        onDeleteGoal(goal.id);
-                                        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-                                      }
-                                    });
-                                  }}
-                                  className={`${goal.isCompleted ? 'flex-1' : ''} bg-red-500 text-white px-2 py-1.5 rounded text-xs hover:bg-red-600`}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setSelectedUserId(user.id);
-                                  setNewGoal({ ...newGoal, category: category.id as GoalCategory });
-                                  setShowAddGoal(true);
-                                }}
-                                className="flex-1 bg-primary-500 text-white px-2 py-1.5 rounded text-xs hover:bg-primary-600"
-                              >
-                                Add Goal
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Desktop Layout */}
-                        <div className="hidden sm:flex sm:items-center sm:justify-between">
-                          <div className="flex items-center space-x-3 flex-1">
-                            <span className="text-xl">{category.icon}</span>
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900">{category.name}</div>
+                                {goal?.isCompleted && (
+                                  <span className="px-1.5 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                    ✅
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mb-2">
                               {goal ? (
-                                <div className="text-sm text-gray-600">{goal.description}</div>
+                                <div className="text-xs text-gray-600">
+                                  {goal.description}
+                                </div>
                               ) : (
-                                <div className="text-sm text-gray-400 italic">No goal set for this category</div>
+                                <div className="text-xs text-gray-400 italic">
+                                  No goal set
+                                </div>
                               )}
                               {goal?.completedDate && (
                                 <div className="text-xs text-green-600 mt-1">
-                                  ✅ Completed on {new Date(goal.completedDate).toLocaleDateString()}
+                                  Completed{" "}
+                                  {new Date(
+                                    goal.completedDate,
+                                  ).toLocaleDateString()}
                                 </div>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {goal ? (
+                                <>
+                                  {!goal.isCompleted && (
+                                    <>
+                                      <button
+                                        onClick={() => handleCompleteGoal(goal)}
+                                        className="flex-1 bg-green-500 text-white px-2 py-1.5 rounded text-xs hover:bg-green-600"
+                                      >
+                                        Complete
+                                      </button>
+                                      <button
+                                        onClick={() => handleEditGoal(goal)}
+                                        className="bg-blue-500 text-white px-2 py-1.5 rounded text-xs hover:bg-blue-600"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      setConfirmDialog({
+                                        isOpen: true,
+                                        title: "Delete Goal",
+                                        message: `Are you sure you want to delete this ${category.name} goal?`,
+                                        onConfirm: () => {
+                                          onDeleteGoal(goal.id);
+                                          setConfirmDialog((prev) => ({
+                                            ...prev,
+                                            isOpen: false,
+                                          }));
+                                        },
+                                      });
+                                    }}
+                                    className={`${goal.isCompleted ? "flex-1" : ""} bg-red-500 text-white px-2 py-1.5 rounded text-xs hover:bg-red-600`}
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setSelectedUserId(user.id);
+                                    setNewGoal({
+                                      ...newGoal,
+                                      category: category.id as GoalCategory,
+                                    });
+                                    setShowAddGoal(true);
+                                  }}
+                                  className="flex-1 bg-primary-500 text-white px-2 py-1.5 rounded text-xs hover:bg-primary-600"
+                                >
+                                  Add Goal
+                                </button>
                               )}
                             </div>
                           </div>
 
-                          <div className="flex items-center space-x-2">
-                            {goal?.isDifficult && (
-                              <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded">
-                                Difficult
-                              </span>
-                            )}
-
-                            {goal?.isCompleted && (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
-                                ✅ Complete
-                              </span>
-                            )}
-
-                            {goal ? (
-                              <div className="flex space-x-2">
-                                {!goal.isCompleted && (
-                                  <button
-                                    onClick={() => handleCompleteGoal(goal)}
-                                    className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
-                                  >
-                                    Complete
-                                  </button>
+                          {/* Desktop Layout */}
+                          <div className="hidden sm:flex sm:items-center sm:justify-between">
+                            <div className="flex items-center space-x-3 flex-1">
+                              <span className="text-xl">{category.icon}</span>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">
+                                  {category.name}
+                                </div>
+                                {goal ? (
+                                  <div className="text-sm text-gray-600">
+                                    {goal.description}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-gray-400 italic">
+                                    No goal set for this category
+                                  </div>
                                 )}
+                                {goal?.completedDate && (
+                                  <div className="text-xs text-green-600 mt-1">
+                                    ✅ Completed on{" "}
+                                    {new Date(
+                                      goal.completedDate,
+                                    ).toLocaleDateString()}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              {goal?.isDifficult && (
+                                <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                  Difficult
+                                </span>
+                              )}
+
+                              {goal?.isCompleted && (
+                                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                  ✅ Complete
+                                </span>
+                              )}
+
+                              {goal ? (
+                                <div className="flex space-x-2">
+                                  {!goal.isCompleted && (
+                                    <>
+                                      <button
+                                        onClick={() => handleCompleteGoal(goal)}
+                                        className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
+                                      >
+                                        Complete
+                                      </button>
+                                      <button
+                                        onClick={() => handleEditGoal(goal)}
+                                        className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 flex items-center gap-1"
+                                      >
+                                        <Pencil className="w-4 h-4" />
+                                        Edit
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      setConfirmDialog({
+                                        isOpen: true,
+                                        title: "Delete Goal",
+                                        message: `Are you sure you want to delete this ${category.name} goal?`,
+                                        onConfirm: () => {
+                                          onDeleteGoal(goal.id);
+                                          setConfirmDialog((prev) => ({
+                                            ...prev,
+                                            isOpen: false,
+                                          }));
+                                        },
+                                      });
+                                    }}
+                                    className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              ) : (
                                 <button
                                   onClick={() => {
-                                    setConfirmDialog({
-                                      isOpen: true,
-                                      title: 'Delete Goal',
-                                      message: `Are you sure you want to delete this ${category.name} goal?`,
-                                      onConfirm: () => {
-                                        onDeleteGoal(goal.id);
-                                        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-                                      }
+                                    setSelectedUserId(user.id);
+                                    setNewGoal({
+                                      ...newGoal,
+                                      category: category.id as GoalCategory,
                                     });
+                                    setShowAddGoal(true);
                                   }}
-                                  className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                  className="bg-primary-500 text-white px-3 py-1 rounded text-sm hover:bg-primary-600"
                                 >
-                                  Delete
+                                  Add Goal
                                 </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setSelectedUserId(user.id);
-                                  setNewGoal({ ...newGoal, category: category.id as GoalCategory });
-                                  setShowAddGoal(true);
-                                }}
-                                className="bg-primary-500 text-white px-3 py-1 rounded text-sm hover:bg-primary-600"
-                              >
-                                Add Goal
-                              </button>
-                            )}
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
+                      );
                     })}
                   </div>
                 </div>
@@ -360,30 +484,43 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
       {showAddGoal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New Goal</h3>
-            
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Add New Goal
+            </h3>
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select User</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Select User
+                </label>
                 <select
                   value={selectedUserId}
                   onChange={(e) => setSelectedUserId(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 >
                   <option value="">Choose a participant...</option>
-                  {users.sort((a, b) => a.name.localeCompare(b.name)).map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.avatar} {user.name}
-                    </option>
-                  ))}
+                  {users
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.avatar} {user.name}
+                      </option>
+                    ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Category
+                </label>
                 <select
                   value={newGoal.category}
-                  onChange={(e) => setNewGoal({ ...newGoal, category: e.target.value as GoalCategory })}
+                  onChange={(e) =>
+                    setNewGoal({
+                      ...newGoal,
+                      category: e.target.value as GoalCategory,
+                    })
+                  }
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 >
                   {GOAL_CATEGORIES.map((category) => (
@@ -395,10 +532,14 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
                 <textarea
                   value={newGoal.description}
-                  onChange={(e) => setNewGoal({ ...newGoal, description: e.target.value })}
+                  onChange={(e) =>
+                    setNewGoal({ ...newGoal, description: e.target.value })
+                  }
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 h-20"
                   placeholder="e.g., Run 5K in under 30 minutes (current best: 32:15)"
                 />
@@ -409,7 +550,9 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
                   type="checkbox"
                   id="isDifficult"
                   checked={newGoal.isDifficult}
-                  onChange={(e) => setNewGoal({ ...newGoal, isDifficult: e.target.checked })}
+                  onChange={(e) =>
+                    setNewGoal({ ...newGoal, isDifficult: e.target.checked })
+                  }
                   className="rounded"
                 />
                 <label htmlFor="isDifficult" className="text-sm text-gray-700">
@@ -422,10 +565,10 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
               <button
                 onClick={() => {
                   setShowAddGoal(false);
-                  setSelectedUserId('');
+                  setSelectedUserId("");
                   setNewGoal({
-                    category: 'cardio',
-                    description: '',
+                    category: "cardio",
+                    description: "",
                     isDifficult: false,
                   });
                 }}
@@ -445,6 +588,80 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
         </div>
       )}
 
+      {/* Edit Goal Modal */}
+      {showEditGoal && editingGoal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Edit Goal
+            </h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Category (cannot be changed)
+                </label>
+                <div className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-600">
+                  {GOAL_CATEGORIES.find((c) => c.id === editingGoal.category)?.icon}{" "}
+                  {GOAL_CATEGORIES.find((c) => c.id === editingGoal.category)?.name}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={editGoalForm.description}
+                  onChange={(e) =>
+                    setEditGoalForm({
+                      ...editGoalForm,
+                      description: e.target.value,
+                    })
+                  }
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 h-20"
+                  placeholder="e.g., Run 5K in under 30 minutes (current best: 32:15)"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="editIsDifficult"
+                  checked={editGoalForm.isDifficult}
+                  onChange={(e) =>
+                    setEditGoalForm({
+                      ...editGoalForm,
+                      isDifficult: e.target.checked,
+                    })
+                  }
+                  className="rounded"
+                />
+                <label htmlFor="editIsDifficult" className="text-sm text-gray-700">
+                  This is a difficult goal (a real stretch)
+                </label>
+              </div>
+            </div>
+
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={handleCancelEdit}
+                className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEditedGoal}
+                disabled={!editGoalForm.description.trim()}
+                className="flex-1 bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600 disabled:opacity-50"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm Dialog */}
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}
@@ -453,7 +670,9 @@ const Goals: React.FC<GoalsProps> = ({ user, users, goals, onAddGoal, onUpdateGo
         confirmLabel="Delete"
         isDestructive={true}
         onConfirm={confirmDialog.onConfirm}
-        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        onCancel={() =>
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }))
+        }
       />
     </div>
   );

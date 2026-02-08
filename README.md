@@ -1,12 +1,13 @@
 # FitBois 2.0 - Challenge Tracker 💪
 
-A comprehensive fitness challenge tracking application built for the FitBois 2.0 6-month fitness challenge (January - June 2025).
+A full-stack fitness challenge tracking application built for the FitBois 2.0 6-month fitness challenge.
 
 ## Challenge Overview
 
 **Focus:** Consistency and personal progress - not who's already the fittest, but who actually shows up and improves.
 
-**Timeline:** January 19 - July 31, 2026 (~6 months)
+**Timeline:** January 19 - July 31, 2026 (~6 months)  
+**Buy-in:** ₹5,000 per person
 
 ### Key Rules
 
@@ -43,136 +44,258 @@ A comprehensive fitness challenge tracking application built for the FitBois 2.0
 
 ### 📊 Dashboard
 - Personal progress overview
-- Challenge timeline
-- Weekly proof tracking
-- Alerts and reminders
+- Real-time statistics and metrics
+- Weekly workout tracking
+- User consistency levels
 
 ### 🎯 Goals Management
-- Create and track 5 goals across categories
-- Mark difficult goals
-- Upload proofs for each goal
+- Create, edit, and delete goals across 5 categories
+- Mark difficult goals (at least one required)
 - Complete goals and earn points
+- Category completion tracking with visual indicators
+- Modal-based editing interface
 
-### 📅 Consistency Tracking
-- Weekly update system
-- Visual progress through levels (5→4→3 days/week)
-- Clean weeks counter
-- Proof upload with descriptions
+### 💪 Workout Tracking
+- Week-by-week workout logging
+- Day-of-week completion tracking
+- Consistency level monitoring (5→4→3 days/week)
+- Visual calendar interface
+- Admin controls for bulk updates
 
-### 🏆 Leaderboard
-- Real-time rankings
-- Multiple sorting options (points, consistency, categories)
-- Detailed user statistics
-- Category completion tracking
-
-### 👤 User Profile
-- Personal information management
-- Challenge statistics
-- Special rules (e.g., Subhash's winner bonus)
-- Rules reference
+### 👥 Admin Panel
+- User management (add, edit, delete participants)
+- Workout data management
+- Consistency recalculation tools
+- Database maintenance features
 
 ## Technology Stack
 
-- **Frontend:** React 18 with TypeScript
+### Frontend
+- **Framework:** React 18 with TypeScript
 - **Styling:** Tailwind CSS
 - **Icons:** Lucide React
 - **Build Tool:** Create React App
 
+### Backend
+- **Runtime:** Node.js with Express
+- **Database:** SQLite3
+- **API:** RESTful architecture
+- **Validation:** Server-side input validation
+- **Security:** XSS prevention, SQL injection protection
+
+### Deployment
+- **Platform:** Railway
+- **Configuration:** nixpacks.toml, Procfile
+
 ## Getting Started
 
-1. **Install dependencies:**
+### Prerequisites
+- Node.js (v16 or higher)
+- npm or yarn
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd "FitBois 2.0"
+   ```
+
+2. **Install frontend dependencies:**
    ```bash
    npm install
    ```
 
-2. **Start development server:**
+3. **Install backend dependencies:**
+   ```bash
+   cd backend
+   npm install
+   cd ..
+   ```
+
+### Running the Application
+
+1. **Start the backend server** (in one terminal):
+   ```bash
+   cd backend
+   node server.js
+   ```
+   Backend will run on `http://localhost:5000`
+
+2. **Start the frontend** (in another terminal):
    ```bash
    npm start
    ```
+   Frontend will run on `http://localhost:3000`
 
 3. **Open your browser:**
    Navigate to `http://localhost:3000`
 
+### Database Setup
+
+The SQLite database will be automatically created on first run at:
+```
+backend/database/fitbois.db
+```
+
+To initialize with sample data, use the backend scripts:
+```bash
+cd backend
+node scripts/initDatabase.js
+```
+
 ## Project Structure
 
 ```
-src/
-├── components/           # React components
-│   ├── Dashboard.tsx    # Main dashboard view
-│   ├── Goals.tsx        # Goals management
-│   ├── Consistency.tsx  # Weekly tracking
-│   ├── Leaderboard.tsx  # Rankings & stats
-│   ├── UserProfile.tsx  # User profile
-│   └── Header.tsx       # Navigation header
-├── utils/
-│   └── mockData.ts      # Sample data generation
-├── types.ts             # TypeScript interfaces
-├── App.tsx             # Main app component
-└── index.tsx           # App entry point
+FitBois 2.0/
+├── backend/                    # Backend server
+│   ├── database/              # SQLite database
+│   │   └── fitbois.db        # Main database file
+│   ├── scripts/              # Database utilities
+│   │   ├── initDatabase.js   # Initialize database
+│   │   ├── backupDatabase.js # Backup utility
+│   │   └── restoreDatabase.js # Restore utility
+│   ├── server.js             # Express server & API
+│   └── package.json          # Backend dependencies
+├── src/                       # Frontend React app
+│   ├── components/           # React components
+│   │   ├── Dashboard.tsx    # Main dashboard
+│   │   ├── Goals.tsx        # Goals management (CRUD)
+│   │   ├── Workout.tsx      # Workout tracking
+│   │   ├── Admin.tsx        # Admin panel
+│   │   ├── Header.tsx       # Navigation
+│   │   └── ...              # Other components
+│   ├── services/
+│   │   └── api.ts           # API client service
+│   ├── utils/
+│   │   ├── consistencyCalculator.ts
+│   │   └── dateUtils.ts
+│   ├── types.ts             # TypeScript interfaces
+│   ├── App.tsx             # Main app component
+│   └── index.tsx           # App entry point
+├── public/                   # Static assets
+├── package.json             # Frontend dependencies
+└── README.md               # This file
 ```
 
 ## Key Features Implemented
 
-### ✅ Consistency Tracking
-- 5→4→3 days/week progression system
-- Clean weeks tracking
-- Weekly proof requirements
-- Visual timeline with status indicators
+### ✅ Full CRUD Operations
+- **Create:** Add new users, goals, and workout entries
+- **Read:** View all data with sorting and filtering
+- **Update:** Edit goals (description, difficulty), modify workout records
+- **Delete:** Remove goals, users, and workout entries with confirmation
 
-### ✅ Goal Management
-- 5-category system with icons
-- Difficult goal requirement
-- Proof upload system
-- Goal completion tracking
+### ✅ Workout Tracking System
+- Week-by-week calendar view
+- Individual day completion tracking
+- Consistency level management (5→4→3 days/week)
+- Automatic clean/missed week calculation
+- Admin bulk update capabilities
 
-### ✅ Scoring System
-- Point calculation (1 point per goal)
-- Category completion tracking
-- Leaderboard with multiple sort options
-- Tiebreaker logic implementation
+### ✅ Goals Management
+- Full edit capability for non-completed goals
+- 5-category system with visual icons
+- Difficult goal enforcement (at least 1 required)
+- Category completion indicators
+- Per-user goal tracking with accordion UI
+
+### ✅ Automatic Consistency Calculator
+- Real-time consistency level adjustments
+- Clean weeks counter
+- Missed weeks tracking
+- Automatic level progression/regression
+- Point calculation system
+
+### ✅ Database & API
+- RESTful API with Express
+- SQLite database with proper indexing
+- Input validation and sanitization
+- Foreign key constraints
+- Transaction support
 
 ### ✅ User Interface
-- Modern, responsive design
-- Mobile-friendly navigation
-- Real-time progress indicators
-- Intuitive modals and forms
+- Modern, responsive design (mobile + desktop)
+- Tailwind CSS styling
+- Modal-based forms
+- Confirmation dialogs for destructive actions
+- Real-time UI updates
 
-## Challenge Timeline
+## API Endpoints
 
-- **Start:** January 19, 2026 (Sunday)
-- **End:** July 31, 2026
-- **Duration:** ~6 months
-- **Buy-in:** ₹5,000 per person
+### Users
+- `GET /api/users` - Get all users
+- `GET /api/users/:id` - Get user by ID
+- `POST /api/users` - Create new user
+- `PUT /api/users/:id` - Update user
+- `DELETE /api/users/:id` - Delete user
+
+### Goals
+- `GET /api/goals` - Get all goals
+- `GET /api/goals/:id` - Get goal by ID
+- `GET /api/goals/user/:userId` - Get goals for a user
+- `POST /api/goals` - Create new goal
+- `PUT /api/goals/:id` - Update goal (edit description, difficulty)
+- `DELETE /api/goals/:id` - Delete goal
+
+### Workouts
+- `GET /api/workouts` - Get all workouts
+- `GET /api/workouts/user/:userId` - Get workouts for a user
+- `GET /api/workouts/:userId/:week` - Get workouts for user and week
+- `POST /api/workouts` - Create/update workout
+- `DELETE /api/workouts/:id` - Delete workout
+
+### Health
+- `GET /api/health` - Check API status
+
+## Deployment
+
+This app is configured for Railway deployment:
+
+1. **Push to GitHub**
+2. **Connect Railway** to your repository
+3. **Railway automatically:**
+   - Detects the project using `nixpacks.toml`
+   - Builds frontend and backend
+   - Starts server using `Procfile`
+   - Serves static React build from backend
 
 ## Special Features
 
 ### Winner Bonus System
-- Subhash starts at 4 days/week (FitBois 1.0 winner reward)
-- Special badges and indicators
+- Previous winner (Subhash) starts at 4 days/week
+- Configurable special rules per user
 
-### Proof System
-- Support for photos, videos, and screenshots
-- Weekly minimum requirements
-- Time-stamped submissions
+### Data Integrity
+- Foreign key constraints
+- Input validation and sanitization
+- SQL injection prevention
+- XSS protection
 
-### Smart Alerts
-- Missing difficult goal warnings
-- Weekly proof reminders
-- Consistency level notifications
+### Automatic Calculations
+- Consistency levels update based on clean/missed weeks
+- Points calculated automatically
+- User status (active/eliminated) tracked
 
-## Development Notes
+## Future Enhancements
 
-This app uses mock data for demonstration. In a production environment, you would need:
-
-- Backend API for data persistence
-- User authentication system
-- File upload service for proofs
-- Real-time notifications
-- Mobile app version
+Potential features for future versions:
+- User authentication & authorization
+- File upload for workout/goal proofs
+- Push notifications for reminders
+- Mobile app (React Native)
+- Social features (comments, likes)
+- Goal templates library
+- Export data (PDF reports, CSV)
 
 ## Contributing
 
-Built with ❤️ for the FitBois 2.0 challenge. Remember: **This only works if we're honest with ourselves.**
+Built with ❤️ for the FitBois 2.0 challenge.  
+Remember: **This only works if we're honest with ourselves.**
+
+## License
+
+Private project for FitBois 2.0 challenge participants.
 
 ---
 

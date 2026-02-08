@@ -1,17 +1,17 @@
-import React from 'react';
-import { Target, BarChart3, Settings, Dumbbell } from 'lucide-react';
+import React from "react";
+import { Target, BarChart3, Settings, Dumbbell } from "lucide-react";
 
 interface HeaderProps {
   activeView: string;
-  onViewChange: (view: 'workout' | 'goals' | 'dashboard' | 'admin') => void;
+  onViewChange: (view: "workout" | "goals" | "dashboard" | "admin") => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ activeView, onViewChange }) => {
   const navItems = [
-    { id: 'workout', label: 'Workout', icon: Dumbbell },
-    { id: 'goals', label: 'Goals', icon: Target },
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-    { id: 'admin', label: 'Admin', icon: Settings },
+    { id: "workout", label: "Workout", icon: Dumbbell },
+    { id: "goals", label: "Goals", icon: Target },
+    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
+    { id: "admin", label: "Admin", icon: Settings },
   ] as const;
 
   return (
@@ -22,7 +22,9 @@ const Header: React.FC<HeaderProps> = ({ activeView, onViewChange }) => {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center space-x-3">
-              <h1 className="text-xl font-bold text-gray-900">💪 FitBois 2.0</h1>
+              <h1 className="text-xl font-bold text-gray-900">
+                💪 FitBois 2.0
+              </h1>
             </div>
 
             {/* Desktop Navigation */}
@@ -35,8 +37,8 @@ const Header: React.FC<HeaderProps> = ({ activeView, onViewChange }) => {
                     onClick={() => onViewChange(item.id as any)}
                     className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
                       activeView === item.id
-                        ? 'bg-primary-500 text-white'
-                        : 'text-gray-600 hover:bg-gray-100'
+                        ? "bg-primary-500 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
                     }`}
                   >
                     <Icon size={18} />
@@ -67,13 +69,13 @@ const Header: React.FC<HeaderProps> = ({ activeView, onViewChange }) => {
                 key={item.id}
                 onClick={() => onViewChange(item.id as any)}
                 className={`flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] transition-colors ${
-                  isActive
-                    ? 'text-primary-500'
-                    : 'text-gray-400'
+                  isActive ? "text-primary-500" : "text-gray-400"
                 }`}
               >
                 <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-                <span className={`text-xs mt-1 ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                <span
+                  className={`text-xs mt-1 ${isActive ? "font-semibold" : "font-medium"}`}
+                >
                   {item.label}
                 </span>
               </button>
