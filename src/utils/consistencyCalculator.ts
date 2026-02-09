@@ -97,7 +97,27 @@ export const calculateConsistencyMetrics = (
 };
 
 /**
+ * Calculate consecutive clean weeks from the most recent missed week or start
+ */
+const calculateConsecutiveCleanWeeksFromLastMiss = (weekStatuses: WeekStatus[]): number => {
+  // Count backwards from the most recent week
+  // Stop when we hit a missed week
+  let consecutiveClean = 0;
+  for (let i = weekStatuses.length - 1; i >= 0; i--) {
+    if (weekStatuses[i].isComplete) {
+      consecutiveClean++;
+    } else {
+      // Hit a missed week - stop counting
+      break;
+    }
+  }
+  
+  return consecutiveClean;
+};
+
+/**
  * Calculate new consistency level based on clean weeks and missed weeks (only for completed weeks)
+ * Progression happens based on consecutive clean weeks from the last miss
  */
 export const calculateNewConsistencyLevel = (
   user: User,
@@ -107,26 +127,30 @@ export const calculateNewConsistencyLevel = (
   const currentLevel = user.currentConsistencyLevel;
   const startingLevel = user.specialRules?.startingLevel || 5; // Default to 5 if no special rules
   
-  // Only check for regression based on completed weeks (not current week in progress)
-  // Check for regression first: Miss a completed week → move back up one level
-  const hasMissedCompletedWeek = weekStatuses.some(status => !status.isComplete);
+  // Calculate consecutive clean weeks from the most recent missed week
+  const recentConsecutiveClean = calculateConsecutiveCleanWeeksFromLastMiss(weekStatuses);
   
-  if (hasMissedCompletedWeek) {
-    // Regression rules: Miss a completed week → move back up (but not above starting level)
+  // Check if the most recent week was missed (for regression)
+  const lastWeekStatus = weekStatuses[weekStatuses.length - 1];
+  const missedLastWeek = lastWeekStatus && !lastWeekStatus.isComplete;
+  
+  if (missedLastWeek) {
+    // Regression rules: Miss a week → move back up one level (but not above starting level)
     if (currentLevel === 3) return Math.min(4, startingLevel) as 3 | 4 | 5;
     if (currentLevel === 4) return Math.min(5, startingLevel) as 3 | 4 | 5;
     // Already at 5, can't go higher
     return 5;
   }
   
-  // Progression rules (only if no missed completed weeks):
-  // 5 days -> 4 days: 3 consecutive clean weeks (only if starting level allows)
-  // 4 days -> 3 days: 3 consecutive clean weeks (from start of 4-day level)
+  // Progression rules:
+  // Level 5 → 4: 3 consecutive clean weeks
+  // Level 4 → 3: 6 consecutive clean weeks total (3 at level 5 + 3 more at level 4)
+  // This prevents double-progression and ensures users spend time at each level
   
-  if (currentLevel === 5 && consecutiveCleanWeeks >= 3) {
-    return Math.max(4, startingLevel) as 3 | 4 | 5; // Don't go below starting level
-  } else if (currentLevel === 4 && consecutiveCleanWeeks >= 6) { // 3 more after reaching 4
-    return Math.max(3, startingLevel) as 3 | 4 | 5; // Don't go below starting level
+  if (currentLevel === 5 && recentConsecutiveClean >= 3 && startingLevel <= 4) {
+    return 4;
+  } else if (currentLevel === 4 && recentConsecutiveClean >= 6 && startingLevel <= 3) {
+    return 3;
   }
   
   return currentLevel;
