@@ -5,9 +5,9 @@
 ### **1. Basic Progression System:**
 ```
 Everyone starts with 5 days/week ✅
-↓ (3 consecutive clean weeks)
+↓ (3 consecutive clean weeks at level 5)
 4 days/week ✅
-↓ (3 more consecutive clean weeks = 6 total)
+↓ (3 consecutive clean weeks at level 4)
 3 days/week ✅
 ```
 

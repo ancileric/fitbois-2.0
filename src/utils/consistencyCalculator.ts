@@ -144,12 +144,14 @@ export const calculateNewConsistencyLevel = (
   
   // Progression rules:
   // Level 5 → 4: 3 consecutive clean weeks
-  // Level 4 → 3: 6 consecutive clean weeks total (3 at level 5 + 3 more at level 4)
-  // This prevents double-progression and ensures users spend time at each level
+  // Level 4 → 3: 3 consecutive clean weeks at level 4
+  //
+  // Note: startingLevel ONLY affects regression (see above), not progression
+  // All users can progress downward through levels they achieve
   
-  if (currentLevel === 5 && recentConsecutiveClean >= 3 && startingLevel <= 4) {
+  if (currentLevel === 5 && recentConsecutiveClean >= 3) {
     return 4;
-  } else if (currentLevel === 4 && recentConsecutiveClean >= 6 && startingLevel <= 3) {
+  } else if (currentLevel === 4 && recentConsecutiveClean >= 3) {
     return 3;
   }
   
