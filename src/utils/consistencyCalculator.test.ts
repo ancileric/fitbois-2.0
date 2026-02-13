@@ -85,117 +85,119 @@ describe('Consistency Calculator Tests', () => {
       expect(status.completedWorkouts).toBe(7);
       expect(status.isComplete).toBe(true);
     });
+
+    test('should use requiredWorkoutsOverride when provided', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [4]);
+
+      const status = calculateWeekStatus(user, workouts, 1, 4);
+
+      expect(status.requiredWorkouts).toBe(4);
+      expect(status.isComplete).toBe(true);
+    });
   });
 
   describe('Progression: Level 5 → 4 (3 clean weeks)', () => {
     test('should progress from level 5 to 4 after 3 consecutive clean weeks', () => {
       const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 5, 5]); // 3 weeks of 5 workouts
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 4); // Current week is 4
 
-      const newLevel = calculateNewConsistencyLevel(user, 3, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 4, 0);
 
-      console.log('Test: 3 weeks at level 5');
-      console.log('Week statuses:', weekStatuses);
-      console.log('Expected: 4, Got:', newLevel);
-
-      expect(newLevel).toBe(4);
+      expect(update.newConsistencyLevel).toBe(4);
     });
 
     test('should NOT progress with only 2 clean weeks', () => {
       const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 5]); // Only 2 weeks
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 3);
 
-      const newLevel = calculateNewConsistencyLevel(user, 2, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 3, 0);
 
-      expect(newLevel).toBe(5);
+      expect(update.newConsistencyLevel).toBe(5);
     });
 
     test('should NOT progress if one week is incomplete', () => {
       const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 4, 5]); // Week 2 incomplete
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 4);
 
-      const newLevel = calculateNewConsistencyLevel(user, 2, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 4, 0);
 
-      console.log('Test: Week 2 incomplete at level 5');
-      console.log('Week statuses:', weekStatuses);
-      console.log('Expected: 5, Got:', newLevel);
-
-      expect(newLevel).toBe(5);
+      expect(update.newConsistencyLevel).toBe(5);
     });
 
     test('should progress after recovering from missed week', () => {
       const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 4, 5, 5, 5]); // Miss week 2, then 3 clean
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 6);
 
-      const newLevel = calculateNewConsistencyLevel(user, 3, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 6, 0);
 
-      console.log('Test: Recovered from missed week');
-      console.log('Week statuses:', weekStatuses);
-      console.log('Expected: 4 (3 consecutive after miss), Got:', newLevel);
-
-      expect(newLevel).toBe(4);
+      expect(update.newConsistencyLevel).toBe(4);
     });
   });
 
-  describe('Progression: Level 4 → 3 (requires special handling)', () => {
-    test('CRITICAL: User at level 4 with 3 clean weeks should progress to level 3', () => {
-      // User already progressed to level 4
-      const user = createUser('u1', 4);
-      // Simulating: weeks 1-3 were at level 5 (5 workouts each)
-      // Now at level 4, weeks 4-6 have 4 workouts each
+  describe('Progression: Level 4 → 3 (requires simulation)', () => {
+    test('CRITICAL: User should progress 5→4→3 with 6 clean weeks', () => {
+      // User starts at level 5. Weeks 1-3: 5 workouts each (level 5).
+      // After week 3: progresses to level 4. Weeks 4-6: 4 workouts each (level 4).
+      // After week 6: progresses to level 3.
+      const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4]);
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 7);
 
-      const newLevel = calculateNewConsistencyLevel(user, 6, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 7, 0);
 
-      console.log('Test: Level 4 user with 6 total weeks');
-      console.log('Week statuses:', weekStatuses);
-      console.log('User current level:', user.currentConsistencyLevel);
-      console.log('Expected: 3, Got:', newLevel);
+      expect(update.newConsistencyLevel).toBe(3);
+    });
 
-      // THIS IS THE BUG: It requires 6 consecutive weeks from last miss
-      // But if user is at level 4, checking past weeks against level 4 requirement is wrong!
-      expect(newLevel).toBe(3);
+    test('should NOT skip level: 3 clean weeks at level 5 → level 4 only', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5, 5, 5]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 4, 0);
+
+      expect(update.newConsistencyLevel).toBe(4);
+      // Verify it did NOT jump to 3
+      expect(update.newConsistencyLevel).not.toBe(3);
+    });
+
+    test('should stay at level 4 with only 2 clean weeks after progression', () => {
+      const user = createUser('u1', 5);
+      // 3 clean at level 5 → progresses to 4, then only 2 clean at level 4
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 6, 0);
+
+      expect(update.newConsistencyLevel).toBe(4);
     });
   });
 
   describe('Regression: Miss a week', () => {
-    test('should regress from level 3 to 4 when missing a week', () => {
-      const user = createUser('u1', 3);
-      const workouts = createWorkouts('u1', [3, 3, 2]); // Week 3 incomplete (only 2 workouts)
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 4);
+    test('should regress from level 4 to 5 when missing a week after progression', () => {
+      const user = createUser('u1', 5);
+      // 3 clean at level 5 → level 4, then miss week 4
+      const workouts = createWorkouts('u1', [5, 5, 5, 3]);
 
-      const newLevel = calculateNewConsistencyLevel(user, 2, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 5, 0);
 
-      console.log('Test: Regression from level 3');
-      console.log('Week statuses:', weekStatuses);
-      console.log('Expected: 4 (regressed), Got:', newLevel);
-
-      expect(newLevel).toBe(4);
-    });
-
-    test('should regress from level 4 to 5 when missing a week', () => {
-      const user = createUser('u1', 4);
-      const workouts = createWorkouts('u1', [4, 4, 3]); // Week 3 incomplete
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 4);
-
-      const newLevel = calculateNewConsistencyLevel(user, 2, weekStatuses);
-
-      expect(newLevel).toBe(5);
+      expect(update.newConsistencyLevel).toBe(5);
     });
 
     test('should stay at level 5 when missing a week (already at max)', () => {
       const user = createUser('u1', 5);
       const workouts = createWorkouts('u1', [5, 4]); // Week 2 incomplete
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 3);
 
-      const newLevel = calculateNewConsistencyLevel(user, 1, weekStatuses);
+      const update = calculateConsistencyUpdate(user, workouts, 3, 0);
 
-      expect(newLevel).toBe(5);
+      expect(update.newConsistencyLevel).toBe(5);
+    });
+
+    test('should regress from level 3 to 4 when missing a week', () => {
+      const user = createUser('u1', 5);
+      // 6 clean weeks to reach level 3, then miss week 7
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4, 2]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 8, 0);
+
+      expect(update.newConsistencyLevel).toBe(4);
     });
   });
 
@@ -232,8 +234,6 @@ describe('Consistency Calculator Tests', () => {
 
       const update = calculateConsistencyUpdate(user, workouts, 4, 0);
 
-      console.log('Complete update test:', update);
-
       expect(update.cleanWeeks).toBe(3);
       expect(update.missedWeeks).toBe(0);
       expect(update.newConsistencyLevel).toBe(4);
@@ -260,8 +260,6 @@ describe('Consistency Calculator Tests', () => {
 
       const update = calculateConsistencyUpdate(user, workouts, 4, 0);
 
-      console.log('Subhash test:', update);
-
       expect(update.newConsistencyLevel).toBe(3); // Should progress to 3
       expect(update.levelChanged).toBe(true);
     });
@@ -269,31 +267,55 @@ describe('Consistency Calculator Tests', () => {
 
   describe('Real-world scenario: Mixed progression and regression', () => {
     test('should handle complex scenario: progress, regress, progress again', () => {
-      let user = createUser('u1', 5);
+      const user = createUser('u1', 5);
 
-      // Weeks 1-3: 5 workouts each → should progress to level 4
-      let workouts = createWorkouts('u1', [5, 5, 5]);
-      let update = calculateConsistencyUpdate(user, workouts, 4, 0);
-      console.log('After weeks 1-3:', update);
+      // Weeks 1-3: 5 workouts → progress to level 4
+      // Week 4: 3 workouts (miss at level 4) → regress to level 5
+      // Weeks 5-7: 5 workouts → progress back to level 4
+      const workouts = createWorkouts('u1', [5, 5, 5, 3, 5, 5, 5]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 8, 0);
+
       expect(update.newConsistencyLevel).toBe(4);
+    });
 
-      // Update user to level 4
-      user = { ...user, currentConsistencyLevel: 4 };
+    test('should simulate full 6-week double progression correctly', () => {
+      const user = createUser('u1', 5);
 
-      // Week 4: miss (only 3 workouts) → should regress to level 5
-      workouts = createWorkouts('u1', [5, 5, 5, 3]);
-      update = calculateConsistencyUpdate(user, workouts, 5, 0);
-      console.log('After week 4 miss:', update);
-      expect(update.newConsistencyLevel).toBe(5);
+      // Week-by-week simulation:
+      // Week 1: level 5, 5 workouts → clean (streak: 1)
+      // Week 2: level 5, 5 workouts → clean (streak: 2)
+      // Week 3: level 5, 5 workouts → clean (streak: 3) → PROGRESS to 4, reset streak
+      // Week 4: level 4, 4 workouts → clean (streak: 1)
+      // Week 5: level 4, 4 workouts → clean (streak: 2)
+      // Week 6: level 4, 4 workouts → clean (streak: 3) → PROGRESS to 3, reset streak
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4]);
 
-      // Update user to level 5
-      user = { ...user, currentConsistencyLevel: 5 };
+      const update = calculateConsistencyUpdate(user, workouts, 7, 0);
 
-      // Weeks 5-7: 5 workouts each → should progress back to level 4
-      workouts = createWorkouts('u1', [5, 5, 5, 3, 5, 5, 5]);
-      update = calculateConsistencyUpdate(user, workouts, 8, 0);
-      console.log('After recovery:', update);
-      expect(update.newConsistencyLevel).toBe(4);
+      expect(update.newConsistencyLevel).toBe(3);
+      expect(update.cleanWeeks).toBe(6);
+      expect(update.missedWeeks).toBe(0);
+    });
+  });
+
+  describe('Week statuses reflect simulation', () => {
+    test('week statuses should show correct required workouts per level', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4]);
+
+      const weekStatuses = calculateAllWeekStatuses(user, workouts, 7);
+
+      // Weeks 1-3 should require 5 (level 5)
+      expect(weekStatuses[0].requiredWorkouts).toBe(5);
+      expect(weekStatuses[1].requiredWorkouts).toBe(5);
+      expect(weekStatuses[2].requiredWorkouts).toBe(5);
+      // Weeks 4-6 should require 4 (level 4 after progression)
+      expect(weekStatuses[3].requiredWorkouts).toBe(4);
+      expect(weekStatuses[4].requiredWorkouts).toBe(4);
+      expect(weekStatuses[5].requiredWorkouts).toBe(4);
+      // All weeks should be complete
+      expect(weekStatuses.every(s => s.isComplete)).toBe(true);
     });
   });
 

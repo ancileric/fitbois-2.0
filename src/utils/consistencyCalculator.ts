@@ -17,22 +17,33 @@ export interface ConsistencyUpdate {
 }
 
 /**
- * Calculate week completion status for a user
+ * Count completed workouts for a user in a given week
+ */
+const countCompletedWorkouts = (
+  userId: string,
+  workoutDays: WorkoutDay[],
+  week: number
+): number => {
+  return workoutDays.filter(w =>
+    w.userId === userId &&
+    w.week === week &&
+    w.isCompleted
+  ).length;
+};
+
+/**
+ * Calculate week completion status for a user.
+ * Uses requiredWorkouts parameter so callers can pass the correct level for each week.
  */
 export const calculateWeekStatus = (
-  user: User, 
-  workoutDays: WorkoutDay[], 
-  week: number
+  user: User,
+  workoutDays: WorkoutDay[],
+  week: number,
+  requiredWorkoutsOverride?: number
 ): WeekStatus => {
-  const userWorkouts = workoutDays.filter(w => 
-    w.userId === user.id && 
-    w.week === week && 
-    w.isCompleted
-  );
-  
-  const completedWorkouts = userWorkouts.length;
-  const requiredWorkouts = user.currentConsistencyLevel;
-  
+  const completedWorkouts = countCompletedWorkouts(user.id, workoutDays, week);
+  const requiredWorkouts = requiredWorkoutsOverride ?? user.currentConsistencyLevel;
+
   return {
     week,
     isComplete: completedWorkouts >= requiredWorkouts,
@@ -42,53 +53,71 @@ export const calculateWeekStatus = (
 };
 
 /**
- * Calculate all week statuses for a user (only for completed weeks)
+ * Calculate all week statuses for a user (only for completed weeks).
+ * Uses simulation to determine the correct required workouts for each week.
  */
 export const calculateAllWeekStatuses = (
-  user: User, 
-  workoutDays: WorkoutDay[], 
+  user: User,
+  workoutDays: WorkoutDay[],
   currentWeek: number
 ): WeekStatus[] => {
+  const completedWeeks = currentWeek - 1;
+  if (completedWeeks <= 0) return [];
+
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  let simulatedLevel = startingLevel as number;
+  let consecutiveClean = 0;
   const weekStatuses: WeekStatus[] = [];
-  
-  // Only calculate for completed weeks (not the current ongoing week)
-  const completedWeeks = currentWeek - 1; // Current week is still in progress
-  
+
   for (let week = 1; week <= completedWeeks; week++) {
-    weekStatuses.push(calculateWeekStatus(user, workoutDays, week));
+    const required = simulatedLevel;
+    const status = calculateWeekStatus(user, workoutDays, week, required);
+    weekStatuses.push(status);
+
+    if (status.isComplete) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+      }
+    }
   }
-  
+
   return weekStatuses;
 };
 
 /**
- * Calculate clean weeks and missed weeks for a user (only for completed weeks)
+ * Calculate clean weeks and missed weeks for a user (only for completed weeks).
+ * Each week is evaluated against the level that was active during that week.
  */
 export const calculateConsistencyMetrics = (
-  user: User, 
-  workoutDays: WorkoutDay[], 
+  user: User,
+  workoutDays: WorkoutDay[],
   currentWeek: number
 ): { cleanWeeks: number; missedWeeks: number; consecutiveCleanWeeks: number } => {
-  // Only calculate for completed weeks - current week is still in progress
   const weekStatuses = calculateAllWeekStatuses(user, workoutDays, currentWeek);
-  
+
   let cleanWeeks = 0;
   let missedWeeks = 0;
   let consecutiveCleanWeeks = 0;
   let currentStreak = 0;
-  
+
   weekStatuses.forEach((status) => {
     if (status.isComplete) {
       cleanWeeks++;
       currentStreak++;
       consecutiveCleanWeeks = Math.max(consecutiveCleanWeeks, currentStreak);
     } else {
-      // Only count as missed week if the week is completely finished
       missedWeeks++;
       currentStreak = 0;
     }
   });
-  
+
   return {
     cleanWeeks,
     missedWeeks,
@@ -97,65 +126,96 @@ export const calculateConsistencyMetrics = (
 };
 
 /**
- * Calculate consecutive clean weeks from the most recent missed week or start
- */
-const calculateConsecutiveCleanWeeksFromLastMiss = (weekStatuses: WeekStatus[]): number => {
-  // Count backwards from the most recent week
-  // Stop when we hit a missed week
-  let consecutiveClean = 0;
-  for (let i = weekStatuses.length - 1; i >= 0; i--) {
-    if (weekStatuses[i].isComplete) {
-      consecutiveClean++;
-    } else {
-      // Hit a missed week - stop counting
-      break;
-    }
-  }
-  
-  return consecutiveClean;
-};
-
-/**
- * Calculate new consistency level based on clean weeks and missed weeks (only for completed weeks)
- * Progression happens based on consecutive clean weeks from the last miss
+ * Simulate week-by-week level progression to determine the correct consistency level.
+ * Walks through each completed week chronologically, tracking level changes as they happen.
  */
 export const calculateNewConsistencyLevel = (
   user: User,
-  consecutiveCleanWeeks: number,
+  _consecutiveCleanWeeks: number,
+  _weekStatuses: WeekStatus[],
+  workoutDays?: WorkoutDay[],
+  currentWeek?: number
+): 3 | 4 | 5 => {
+  // If workoutDays and currentWeek are provided, use simulation
+  // Otherwise fall back to using the pre-computed weekStatuses for backward compat
+  if (workoutDays && currentWeek !== undefined) {
+    return simulateProgression(user, workoutDays, currentWeek);
+  }
+
+  // Fallback: use simulation via weekStatuses data
+  return simulateProgressionFromStatuses(user, _weekStatuses);
+};
+
+/**
+ * Core simulation: walk through weeks chronologically, tracking level changes
+ */
+const simulateProgression = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  currentWeek: number
+): 3 | 4 | 5 => {
+  const completedWeeks = currentWeek - 1;
+  if (completedWeeks <= 0) return (user.specialRules?.startingLevel || 5) as 3 | 4 | 5;
+
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  let simulatedLevel = startingLevel;
+  let consecutiveClean = 0;
+
+  for (let week = 1; week <= completedWeeks; week++) {
+    const required = simulatedLevel;
+    const completed = countCompletedWorkouts(user.id, workoutDays, week);
+    const isClean = completed >= required;
+
+    if (isClean) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+      }
+    }
+  }
+
+  return simulatedLevel as 3 | 4 | 5;
+};
+
+/**
+ * Simulation using pre-computed week statuses (for callers that don't pass workoutDays).
+ * Re-evaluates completion against simulated levels using the completedWorkouts from each status.
+ */
+const simulateProgressionFromStatuses = (
+  user: User,
   weekStatuses: WeekStatus[]
 ): 3 | 4 | 5 => {
-  const currentLevel = user.currentConsistencyLevel;
-  const startingLevel = user.specialRules?.startingLevel || 5; // Default to 5 if no special rules
-  
-  // Calculate consecutive clean weeks from the most recent missed week
-  const recentConsecutiveClean = calculateConsecutiveCleanWeeksFromLastMiss(weekStatuses);
-  
-  // Check if the most recent week was missed (for regression)
-  const lastWeekStatus = weekStatuses[weekStatuses.length - 1];
-  const missedLastWeek = lastWeekStatus && !lastWeekStatus.isComplete;
-  
-  if (missedLastWeek) {
-    // Regression rules: Miss a week → move back up one level (but not above starting level)
-    if (currentLevel === 3) return Math.min(4, startingLevel) as 3 | 4 | 5;
-    if (currentLevel === 4) return Math.min(5, startingLevel) as 3 | 4 | 5;
-    // Already at 5, can't go higher
-    return 5;
+  if (weekStatuses.length === 0) return (user.specialRules?.startingLevel || 5) as 3 | 4 | 5;
+
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  let simulatedLevel = startingLevel;
+  let consecutiveClean = 0;
+
+  for (const status of weekStatuses) {
+    const required = simulatedLevel;
+    const isClean = status.completedWorkouts >= required;
+
+    if (isClean) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+      }
+    }
   }
-  
-  // Progression rules:
-  // Level 5 → 4: 3 consecutive clean weeks
-  // Level 4 → 3: 3 consecutive clean weeks at level 4
-  //
-  // Note: startingLevel ONLY affects regression (see above), not progression
-  // All users can progress downward through levels they achieve
-  
-  if (currentLevel === 5 && recentConsecutiveClean >= 3) {
-    return 4;
-  } else if (currentLevel === 4 && recentConsecutiveClean >= 3) {
-    return 3;
-  }
-  
-  return currentLevel;
+
+  return simulatedLevel as 3 | 4 | 5;
 };
 
 /**
@@ -180,17 +240,17 @@ export const calculateConsistencyUpdate = (
 ): ConsistencyUpdate => {
   const weekStatuses = calculateAllWeekStatuses(user, workoutDays, currentWeek);
   const { cleanWeeks, missedWeeks, consecutiveCleanWeeks } = calculateConsistencyMetrics(
-    user, 
-    workoutDays, 
+    user,
+    workoutDays,
     currentWeek
   );
-  
-  const newConsistencyLevel = calculateNewConsistencyLevel(user, consecutiveCleanWeeks, weekStatuses);
+
+  const newConsistencyLevel = simulateProgression(user, workoutDays, currentWeek);
   const levelChanged = newConsistencyLevel !== user.currentConsistencyLevel;
-  
+
   // Points = completed goals (1 point each) + clean weeks (1 point each)
   const totalPoints = completedGoals + cleanWeeks;
-  
+
   return {
     userId: user.id,
     cleanWeeks,
@@ -212,13 +272,13 @@ export const updateAllUsersConsistency = (
 ): User[] => {
   return users.map(user => {
     if (!user.isActive) return user;
-    
+
     const userCompletedGoals = goals.filter(g => g.userId === user.id && g.isCompleted).length;
     const update = calculateConsistencyUpdate(user, workoutDays, currentWeek, userCompletedGoals);
-    
+
     // Check for elimination
     const eliminated = shouldBeEliminated(user, update.missedWeeks);
-    
+
     return {
       ...user,
       cleanWeeks: update.cleanWeeks,
