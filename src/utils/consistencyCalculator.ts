@@ -238,8 +238,7 @@ export const calculateConsistencyUpdate = (
   currentWeek: number,
   completedGoals: number
 ): ConsistencyUpdate => {
-  const weekStatuses = calculateAllWeekStatuses(user, workoutDays, currentWeek);
-  const { cleanWeeks, missedWeeks, consecutiveCleanWeeks } = calculateConsistencyMetrics(
+  const { cleanWeeks, missedWeeks } = calculateConsistencyMetrics(
     user,
     workoutDays,
     currentWeek
