@@ -3,7 +3,7 @@ export interface User {
   name: string;
   avatar?: string;
   startDate: string;
-  currentConsistencyLevel: 3 | 4 | 5; // days per week
+  currentConsistencyLevel: 3 | 4 | 5; // consistency level (levels 3 & 4 both require 4 workouts/week)
   cleanWeeks: number;
   missedWeeks: number;
   totalPoints: number;
@@ -85,8 +85,17 @@ export interface ConsistencyRule {
 export const CONSISTENCY_RULES: ConsistencyRule[] = [
   { level: 5, daysPerWeek: 5, cleanWeeksRequired: 3, canUseSteps: true },
   { level: 4, daysPerWeek: 4, cleanWeeksRequired: 3, canUseSteps: false },
-  { level: 3, daysPerWeek: 3, cleanWeeksRequired: 0, canUseSteps: false },
+  { level: 3, daysPerWeek: 4, cleanWeeksRequired: 0, canUseSteps: false },
 ];
+
+/**
+ * Get the required number of workouts per week for a given consistency level.
+ * Levels 3 and 4 both require 4 workouts/week. Level 5 requires 5.
+ */
+export const getRequiredWorkouts = (level: number): number => {
+  if (level <= 4) return 4;
+  return level;
+};
 
 export const GOAL_CATEGORIES = [
   { id: 'cardio', name: 'Cardio / Endurance', icon: '🏃‍♂️' },

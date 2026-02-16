@@ -7,7 +7,7 @@ import {
   calculateConsistencyUpdate,
   updateAllUsersConsistency,
 } from './consistencyCalculator';
-import { User, WorkoutDay } from '../types';
+import { User, WorkoutDay, getRequiredWorkouts } from '../types';
 
 describe('Consistency Calculator Tests', () => {
   // Helper to create a user
@@ -302,9 +302,9 @@ describe('Consistency Calculator Tests', () => {
   describe('Week statuses reflect simulation', () => {
     test('week statuses should show correct required workouts per level', () => {
       const user = createUser('u1', 5);
-      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4]);
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4, 4]);
 
-      const weekStatuses = calculateAllWeekStatuses(user, workouts, 7);
+      const weekStatuses = calculateAllWeekStatuses(user, workouts, 8);
 
       // Weeks 1-3 should require 5 (level 5)
       expect(weekStatuses[0].requiredWorkouts).toBe(5);
@@ -314,8 +314,46 @@ describe('Consistency Calculator Tests', () => {
       expect(weekStatuses[3].requiredWorkouts).toBe(4);
       expect(weekStatuses[4].requiredWorkouts).toBe(4);
       expect(weekStatuses[5].requiredWorkouts).toBe(4);
+      // Week 7 should require 4 (level 3 still requires 4 minimum)
+      expect(weekStatuses[6].requiredWorkouts).toBe(4);
       // All weeks should be complete
       expect(weekStatuses.every(s => s.isComplete)).toBe(true);
+    });
+  });
+
+  describe('Required workouts per level', () => {
+    test('level 5 requires 5 workouts', () => {
+      expect(getRequiredWorkouts(5)).toBe(5);
+    });
+
+    test('level 4 requires 4 workouts', () => {
+      expect(getRequiredWorkouts(4)).toBe(4);
+    });
+
+    test('level 3 requires 4 workouts (minimum 4 rule)', () => {
+      expect(getRequiredWorkouts(3)).toBe(4);
+    });
+
+    test('level 3 user needs 4 workouts for a clean week', () => {
+      const user = createUser('u1', 5);
+      // 6 clean weeks to reach level 3, then week 7 with only 3 workouts should be a miss
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4, 3]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 8, 0);
+
+      // 3 workouts at level 3 is NOT enough (need 4), so user regresses to level 4
+      expect(update.newConsistencyLevel).toBe(4);
+    });
+
+    test('level 3 user with 4 workouts gets a clean week', () => {
+      const user = createUser('u1', 5);
+      // 6 clean weeks to reach level 3, then week 7 with 4 workouts should be clean
+      const workouts = createWorkouts('u1', [5, 5, 5, 4, 4, 4, 4]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 8, 0);
+
+      expect(update.newConsistencyLevel).toBe(3);
+      expect(update.cleanWeeks).toBe(7);
     });
   });
 

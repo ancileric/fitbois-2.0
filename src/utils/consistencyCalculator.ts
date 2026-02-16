@@ -1,4 +1,4 @@
-import { User, WorkoutDay } from '../types';
+import { User, WorkoutDay, getRequiredWorkouts } from '../types';
 
 export interface WeekStatus {
   week: number;
@@ -42,7 +42,7 @@ export const calculateWeekStatus = (
   requiredWorkoutsOverride?: number
 ): WeekStatus => {
   const completedWorkouts = countCompletedWorkouts(user.id, workoutDays, week);
-  const requiredWorkouts = requiredWorkoutsOverride ?? user.currentConsistencyLevel;
+  const requiredWorkouts = requiredWorkoutsOverride ?? getRequiredWorkouts(user.currentConsistencyLevel);
 
   return {
     week,
@@ -70,7 +70,7 @@ export const calculateAllWeekStatuses = (
   const weekStatuses: WeekStatus[] = [];
 
   for (let week = 1; week <= completedWeeks; week++) {
-    const required = simulatedLevel;
+    const required = getRequiredWorkouts(simulatedLevel);
     const status = calculateWeekStatus(user, workoutDays, week, required);
     weekStatuses.push(status);
 
@@ -162,7 +162,7 @@ const simulateProgression = (
   let consecutiveClean = 0;
 
   for (let week = 1; week <= completedWeeks; week++) {
-    const required = simulatedLevel;
+    const required = getRequiredWorkouts(simulatedLevel);
     const completed = countCompletedWorkouts(user.id, workoutDays, week);
     const isClean = completed >= required;
 
@@ -198,7 +198,7 @@ const simulateProgressionFromStatuses = (
   let consecutiveClean = 0;
 
   for (const status of weekStatuses) {
-    const required = simulatedLevel;
+    const required = getRequiredWorkouts(simulatedLevel);
     const isClean = status.completedWorkouts >= required;
 
     if (isClean) {

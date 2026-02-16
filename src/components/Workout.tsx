@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { User, WorkoutDay, AdminSettings } from "../types";
+import { User, WorkoutDay, AdminSettings, getRequiredWorkouts } from "../types";
 import {
   CheckCircle,
   XCircle,
@@ -79,7 +79,7 @@ const Workout: React.FC<WorkoutProps> = ({
   // Calculate weekly stats for each user using database data
   const getUserWeekStats = (userId: string, week: number) => {
     const user = users.find((u) => u.id === userId);
-    const requiredDays = user?.currentConsistencyLevel || 5;
+    const requiredDays = user ? getRequiredWorkouts(user.currentConsistencyLevel) : 5;
 
     // Get completed workouts from database for this user and week
     const completedWorkouts = workoutDays.filter(
@@ -117,7 +117,7 @@ const Workout: React.FC<WorkoutProps> = ({
 
       activeUsers.forEach((user) => {
         // Get user's required workouts per week based on their consistency level
-        const requiredWorkouts = user.currentConsistencyLevel;
+        const requiredWorkouts = getRequiredWorkouts(user.currentConsistencyLevel);
 
         // Get actual completed workouts for this user and week from database
         const userWeekWorkouts = workoutDays.filter(

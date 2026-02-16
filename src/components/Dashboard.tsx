@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { User, Goal, WeeklyUpdate, Proof, WorkoutDay } from "../types";
+import { User, Goal, WeeklyUpdate, Proof, WorkoutDay, getRequiredWorkouts } from "../types";
 import {
   getCurrentWeek,
   getChallengeProgress,
@@ -199,7 +199,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       const completedWorkouts = weekDays.filter(
         (d): d is HeatmapDay => d?.isCompleted || false,
       ).length;
-      const metWeeklyGoal = completedWorkouts >= user.currentConsistencyLevel;
+      const metWeeklyGoal = completedWorkouts >= getRequiredWorkouts(user.currentConsistencyLevel);
 
       weeks.push({
         weekNumber,
