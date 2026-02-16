@@ -5,6 +5,7 @@ import {
   getChallengeProgress,
   getDaysUntilStart,
 } from "../utils/dateUtils";
+import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
 import { Calendar, Users, ChevronDown, ChevronUp } from "lucide-react";
 
 interface DashboardProps {
@@ -64,35 +65,77 @@ const Dashboard: React.FC<DashboardProps> = ({
   const leaderboardData = useMemo(() => {
     return users
       .filter((u) => u.isActive)
-      .sort((a, b) => a.name.localeCompare(b.name)) // Start with alphabetical base
+      .sort((a, b) => a.name.localeCompare(b.name))
       .map((user) => {
         const userGoals = goals.filter((g) => g.userId === user.id);
         const completedGoals = userGoals.filter((g) => g.isCompleted).length;
+        const difficultGoalsCompleted = userGoals.filter(
+          (g) => g.isDifficult && g.isCompleted,
+        ).length;
 
-        // Categories covered = count of completed goals (can be > 5 with multiple sets)
-        // This represents total goal achievements across all attempts
-        const categoriesCovered = completedGoals;
+        const userWorkouts = workoutDays.filter(
+          (w) => w.userId === user.id && w.isCompleted,
+        );
+        const totalWorkouts = userWorkouts.length;
+
+        // Calculate workout completion rate using accurate per-week requirements
+        const weekStatuses = calculateAllWeekStatuses(
+          user,
+          workoutDays,
+          currentWeek,
+        );
+        const totalCompleted = weekStatuses.reduce(
+          (sum, ws) => sum + ws.completedWorkouts,
+          0,
+        );
+        const totalRequired = weekStatuses.reduce(
+          (sum, ws) => sum + ws.requiredWorkouts,
+          0,
+        );
+        const completionRate =
+          totalRequired > 0 ? totalCompleted / totalRequired : 1;
 
         return {
           ...user,
           completedGoals,
-          categoriesCovered,
-          consistencyScore: user.cleanWeeks * 10 - user.missedWeeks * 5,
+          difficultGoalsCompleted,
+          totalWorkouts,
+          completionRate,
         };
       })
       .sort((a, b) => {
-        // Sort by points, then consistency, then alphabetically
-        // Note: Points already include completed goals (1 point each) + clean weeks (1 point each)
+        // 1. Total points (primary)
         if (b.totalPoints !== a.totalPoints)
           return b.totalPoints - a.totalPoints;
-        if (b.consistencyScore !== a.consistencyScore)
-          return b.consistencyScore - a.consistencyScore;
-        return a.name.localeCompare(b.name); // Alphabetical tiebreaker
+        // 2. Current consistency level (lower = better)
+        if (a.currentConsistencyLevel !== b.currentConsistencyLevel)
+          return a.currentConsistencyLevel - b.currentConsistencyLevel;
+        // 3. Difficult goals completed (more = better)
+        if (b.difficultGoalsCompleted !== a.difficultGoalsCompleted)
+          return b.difficultGoalsCompleted - a.difficultGoalsCompleted;
+        // 4. Total workouts (more = better)
+        if (b.totalWorkouts !== a.totalWorkouts)
+          return b.totalWorkouts - a.totalWorkouts;
+        // 5. Alphabetical fallback
+        return a.name.localeCompare(b.name);
       });
-  }, [users, goals]);
+  }, [users, goals, workoutDays, currentWeek]);
 
-  // Get bottom 2 performers for risk highlighting
-  const bottomPerformers = leaderboardData.slice(-2).map((u) => u.id);
+  // Risk detection
+  const eliminationRiskUsers = new Set(
+    leaderboardData
+      .filter(
+        (u) => u.currentConsistencyLevel === 5 && u.missedWeeks === 1,
+      )
+      .map((u) => u.id),
+  );
+  const lowCompletionUsers = new Set(
+    leaderboardData
+      .filter(
+        (u) => u.completionRate < 0.7 && !eliminationRiskUsers.has(u.id),
+      )
+      .map((u) => u.id),
+  );
 
   // Calculate heatmap data for selected user (GitHub-style layout)
   const heatmapData = useMemo(() => {
@@ -255,15 +298,20 @@ const Dashboard: React.FC<DashboardProps> = ({
         </h2>
         <div className="space-y-3">
           {leaderboardData.map((user, index) => {
-            const isAtRisk = bottomPerformers.includes(user.id);
+            const isEliminationRisk = eliminationRiskUsers.has(user.id);
+            const isLowCompletion = lowCompletionUsers.has(user.id);
+            const completionPct = Math.round(user.completionRate * 100);
+
+            let borderClass = "border-gray-200 hover:border-gray-300";
+            if (isEliminationRisk)
+              borderClass = "border-red-400 bg-red-50";
+            else if (isLowCompletion)
+              borderClass = "border-yellow-400 bg-yellow-50";
+
             return (
               <div
                 key={user.id}
-                className={`p-3 md:p-4 rounded-lg border-2 transition-colors ${
-                  isAtRisk
-                    ? "border-red-200 bg-red-50"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
+                className={`p-3 md:p-4 rounded-lg border-2 transition-colors ${borderClass}`}
               >
                 {/* Mobile Layout */}
                 <div className="md:hidden">
@@ -284,13 +332,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                         </p>
                       </div>
                     </div>
-                    {isAtRisk && (
+                    {isEliminationRisk && (
                       <span className="px-1.5 py-0.5 bg-red-100 text-red-800 text-xs font-medium rounded">
-                        ⚠️
+                        1 miss from elimination
+                      </span>
+                    )}
+                    {isLowCompletion && (
+                      <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                        {completionPct}% completion
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="grid grid-cols-5 gap-2 text-center">
                     <div>
                       <div className="text-sm font-bold text-green-600">
                         {user.cleanWeeks}
@@ -315,6 +368,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                       <div className="text-[10px] text-gray-500">Points</div>
                     </div>
+                    <div>
+                      <div className="text-sm font-bold text-orange-600">
+                        {completionPct}%
+                      </div>
+                      <div className="text-[10px] text-gray-500">Done</div>
+                    </div>
                   </div>
                 </div>
 
@@ -335,14 +394,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                         Level {user.currentConsistencyLevel}
                       </p>
                     </div>
-                    {isAtRisk && (
+                    {isEliminationRisk && (
                       <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded">
-                        ⚠️ At Risk
+                        1 miss from elimination
+                      </span>
+                    )}
+                    {isLowCompletion && (
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                        {completionPct}% completion
                       </span>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-4 gap-6 text-center">
+                  <div className="grid grid-cols-5 gap-6 text-center">
                     <div>
                       <div className="text-lg font-bold text-green-600">
                         {user.cleanWeeks}
@@ -366,6 +430,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                         {user.totalPoints}
                       </div>
                       <div className="text-xs text-gray-500">Points</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-orange-600">
+                        {completionPct}%
+                      </div>
+                      <div className="text-xs text-gray-500">Completion</div>
                     </div>
                   </div>
                 </div>
