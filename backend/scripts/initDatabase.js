@@ -34,6 +34,7 @@ const createTables = () => {
       total_points INTEGER NOT NULL DEFAULT 0,
       is_active BOOLEAN NOT NULL DEFAULT 1,
       special_starting_level INTEGER,
+      reactivated_at_week INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )

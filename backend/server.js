@@ -55,6 +55,18 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // Enable foreign keys
 db.run("PRAGMA foreign_keys = ON");
 
+// Run schema migrations for existing databases
+db.run(
+  "ALTER TABLE users ADD COLUMN reactivated_at_week INTEGER",
+  (err) => {
+    if (err && !err.message.includes("duplicate column name")) {
+      console.error("Migration error (reactivated_at_week):", err.message);
+    } else {
+      console.log("✅ Migration: reactivated_at_week column ready");
+    }
+  }
+);
+
 // Create indexes if they don't exist (for existing databases)
 const createIndexes = () => {
   const indexes = [
@@ -144,11 +156,11 @@ const sanitizeString = (value) => {
 // GET all users
 app.get("/api/users", (req, res) => {
   const query = `
-    SELECT 
+    SELECT
       id, name, avatar, start_date, current_consistency_level,
       clean_weeks, missed_weeks, total_points, is_active,
-      special_starting_level, created_at, updated_at
-    FROM users 
+      special_starting_level, reactivated_at_week, created_at, updated_at
+    FROM users
     ORDER BY name COLLATE NOCASE ASC
   `;
 
@@ -170,11 +182,13 @@ app.get("/api/users", (req, res) => {
       missedWeeks: row.missed_weeks,
       totalPoints: row.total_points,
       isActive: Boolean(row.is_active),
-      specialRules: row.special_starting_level
-        ? {
-            startingLevel: row.special_starting_level,
-          }
-        : undefined,
+      specialRules:
+        row.special_starting_level || row.reactivated_at_week
+          ? {
+              startingLevel: row.special_starting_level || undefined,
+              reactivatedAtWeek: row.reactivated_at_week || undefined,
+            }
+          : undefined,
     }));
 
     console.log(`📊 Fetched ${users.length} users`);
@@ -185,11 +199,11 @@ app.get("/api/users", (req, res) => {
 // GET single user by ID
 app.get("/api/users/:id", (req, res) => {
   const query = `
-    SELECT 
+    SELECT
       id, name, avatar, start_date, current_consistency_level,
       clean_weeks, missed_weeks, total_points, is_active,
-      special_starting_level, created_at, updated_at
-    FROM users 
+      special_starting_level, reactivated_at_week, created_at, updated_at
+    FROM users
     WHERE id = ?
   `;
 
@@ -215,11 +229,13 @@ app.get("/api/users/:id", (req, res) => {
       missedWeeks: row.missed_weeks,
       totalPoints: row.total_points,
       isActive: Boolean(row.is_active),
-      specialRules: row.special_starting_level
-        ? {
-            startingLevel: row.special_starting_level,
-          }
-        : undefined,
+      specialRules:
+        row.special_starting_level || row.reactivated_at_week
+          ? {
+              startingLevel: row.special_starting_level || undefined,
+              reactivatedAtWeek: row.reactivated_at_week || undefined,
+            }
+          : undefined,
     };
 
     res.json(user);
@@ -424,6 +440,7 @@ app.put("/api/users/:id", (req, res) => {
       total_points = ?,
       is_active = ?,
       special_starting_level = ?,
+      reactivated_at_week = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `;
@@ -437,6 +454,7 @@ app.put("/api/users/:id", (req, res) => {
     totalPoints,
     isActive ? 1 : 0,
     specialRules?.startingLevel || null,
+    specialRules?.reactivatedAtWeek || null,
     req.params.id,
   ];
 
@@ -465,11 +483,13 @@ app.put("/api/users/:id", (req, res) => {
       missedWeeks,
       totalPoints,
       isActive,
-      specialRules: specialRules?.startingLevel
-        ? {
-            startingLevel: specialRules.startingLevel,
-          }
-        : undefined,
+      specialRules:
+        specialRules?.startingLevel || specialRules?.reactivatedAtWeek
+          ? {
+              startingLevel: specialRules.startingLevel || undefined,
+              reactivatedAtWeek: specialRules.reactivatedAtWeek || undefined,
+            }
+          : undefined,
     };
 
     res.json(user);
