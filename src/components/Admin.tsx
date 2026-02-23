@@ -5,10 +5,12 @@ import {
   Edit,
   Trash2,
   UserPlus,
-  RotateCcw
+  RotateCcw,
+  UserCheck
 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './ToastContext';
+import { getCurrentWeek } from '../utils/dateUtils';
 
 interface AdminProps {
   users: User[];
@@ -38,6 +40,29 @@ const Admin: React.FC<AdminProps> = ({
     message: string;
     onConfirm: () => void;
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  const [reactivationTarget, setReactivationTarget] = useState<User | null>(null);
+
+  const handleReactivate = (mode: 'mistake' | 'chance') => {
+    if (!reactivationTarget) return;
+
+    if (mode === 'mistake') {
+      onUpdateUser({ ...reactivationTarget, isActive: true });
+    } else {
+      const currentWeek = getCurrentWeek();
+      onUpdateUser({
+        ...reactivationTarget,
+        isActive: true,
+        specialRules: {
+          ...reactivationTarget.specialRules,
+          reactivatedAtWeek: currentWeek,
+        },
+      });
+    }
+
+    setReactivationTarget(null);
+    showToast('Reactivated. Click Recalc to update metrics.', 'success');
+  };
+
   const [newUser, setNewUser] = useState({
     name: '',
     avatar: '',
@@ -118,8 +143,9 @@ const Admin: React.FC<AdminProps> = ({
       cleanWeeks: newUser.cleanWeeks,
       missedWeeks: newUser.missedWeeks,
       isActive: newUser.isActive,
-      specialRules: newUser.specialRules.startingLevel ? {
-        startingLevel: newUser.specialRules.startingLevel
+      specialRules: (newUser.specialRules.startingLevel || editingUser.specialRules?.reactivatedAtWeek) ? {
+        startingLevel: newUser.specialRules.startingLevel,
+        reactivatedAtWeek: editingUser.specialRules?.reactivatedAtWeek,
       } : undefined,
     };
 
@@ -221,11 +247,18 @@ const Admin: React.FC<AdminProps> = ({
                   </div>
                 </div>
 
-                {user.specialRules?.startingLevel && (
-                  <div className="mb-3">
-                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
-                      🏆 Starts at {user.specialRules.startingLevel} days
-                    </span>
+                {(user.specialRules?.startingLevel || user.specialRules?.reactivatedAtWeek) && (
+                  <div className="mb-3 flex flex-wrap gap-1">
+                    {user.specialRules?.startingLevel && (
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                        🏆 Starts at {user.specialRules.startingLevel} days
+                      </span>
+                    )}
+                    {user.specialRules?.reactivatedAtWeek && (
+                      <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
+                        ♻️ 2nd chance wk {user.specialRules.reactivatedAtWeek}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -237,13 +270,21 @@ const Admin: React.FC<AdminProps> = ({
                     <Edit size={14} />
                     <span>Edit</span>
                   </button>
-                  {user.isActive && (
+                  {user.isActive ? (
                     <button
                       onClick={() => handleDeactivateUser(user)}
                       className="flex-1 bg-red-100 text-red-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-200 flex items-center justify-center space-x-1"
                     >
                       <Trash2 size={14} />
                       <span>Remove</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setReactivationTarget(user)}
+                      className="flex-1 bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-200 flex items-center justify-center space-x-1"
+                    >
+                      <UserCheck size={14} />
+                      <span>Reactivate</span>
                     </button>
                   )}
                 </div>
@@ -310,10 +351,19 @@ const Admin: React.FC<AdminProps> = ({
                     </td>
 
                     <td className="py-4 px-4 text-center">
-                      {user.specialRules?.startingLevel ? (
-                        <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
-                          🏆 Starts at {user.specialRules.startingLevel} days
-                        </span>
+                      {user.specialRules?.startingLevel || user.specialRules?.reactivatedAtWeek ? (
+                        <div className="flex flex-col gap-1 items-center">
+                          {user.specialRules?.startingLevel && (
+                            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                              🏆 Starts at {user.specialRules.startingLevel} days
+                            </span>
+                          )}
+                          {user.specialRules?.reactivatedAtWeek && (
+                            <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
+                              ♻️ 2nd chance wk {user.specialRules.reactivatedAtWeek}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-gray-400">None</span>
                       )}
@@ -328,13 +378,21 @@ const Admin: React.FC<AdminProps> = ({
                         >
                           <Edit size={16} />
                         </button>
-                        {user.isActive && (
+                        {user.isActive ? (
                           <button
                             onClick={() => handleDeactivateUser(user)}
                             className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                            title="Deactivate user"
+                            title="Remove user"
                           >
                             <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setReactivationTarget(user)}
+                            className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
+                            title="Reactivate user"
+                          >
+                            <UserCheck size={16} />
                           </button>
                         )}
                       </div>
@@ -492,6 +550,49 @@ const Admin: React.FC<AdminProps> = ({
                 {editingUser ? 'Save Changes' : 'Add Participant'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reactivation Modal */}
+      {reactivationTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">
+              Reactivate {reactivationTarget.name}
+            </h3>
+            <p className="text-sm text-gray-500 mb-5">
+              Why are you reactivating this participant?
+            </p>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => handleReactivate('mistake')}
+                className="w-full text-left border border-gray-200 rounded-lg p-4 hover:border-blue-400 hover:bg-blue-50 transition-colors"
+              >
+                <div className="font-medium text-gray-900 mb-1">Fix a mistake</div>
+                <div className="text-sm text-gray-500">
+                  Workouts were always there — admin error or bug caused incorrect elimination. Recalc will auto-correct metrics.
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleReactivate('chance')}
+                className="w-full text-left border border-gray-200 rounded-lg p-4 hover:border-green-400 hover:bg-green-50 transition-colors"
+              >
+                <div className="font-medium text-gray-900 mb-1">Second chance</div>
+                <div className="text-sm text-gray-500">
+                  Legitimately missed too many weeks but gets another shot. Their stint counter resets from the current week — they won't be immediately re-eliminated.
+                </div>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setReactivationTarget(null)}
+              className="w-full mt-4 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

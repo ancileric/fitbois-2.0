@@ -6,6 +6,7 @@ import {
   shouldBeEliminated,
   calculateConsistencyUpdate,
   updateAllUsersConsistency,
+  calculateStintMissedWeeks,
 } from './consistencyCalculator';
 import { User, WorkoutDay, getRequiredWorkouts } from '../types';
 
@@ -202,7 +203,7 @@ describe('Consistency Calculator Tests', () => {
   });
 
   describe('Elimination', () => {
-    test('should eliminate user with 2 missed weeks at level 5', () => {
+    test('should eliminate user with 2 stint-missed weeks at level 5', () => {
       const user = createUser('u1', 5);
 
       const eliminated = shouldBeEliminated(user, 2);
@@ -210,7 +211,7 @@ describe('Consistency Calculator Tests', () => {
       expect(eliminated).toBe(true);
     });
 
-    test('should NOT eliminate user with 2 missed weeks at level 4', () => {
+    test('should NOT eliminate user with 2 stint-missed weeks at level 4', () => {
       const user = createUser('u1', 4);
 
       const eliminated = shouldBeEliminated(user, 2);
@@ -218,12 +219,76 @@ describe('Consistency Calculator Tests', () => {
       expect(eliminated).toBe(false);
     });
 
-    test('should NOT eliminate user with only 1 missed week at level 5', () => {
+    test('should NOT eliminate user with only 1 stint-missed week at level 5', () => {
       const user = createUser('u1', 5);
 
       const eliminated = shouldBeEliminated(user, 1);
 
       expect(eliminated).toBe(false);
+    });
+  });
+
+  describe('Per-stint elimination logic', () => {
+    test('stintMissedWeeks resets when user progresses from level 5 to 4', () => {
+      const user = createUser('u1', 5);
+      // Week 1: miss at level 5 (stintMissedWeeks = 1)
+      // Weeks 2-4: 5 workouts each → 3 clean in a row → progress to level 4, reset to 0
+      const workouts = createWorkouts('u1', [3, 5, 5, 5]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 5);
+
+      expect(stintMissedWeeks).toBe(0);
+    });
+
+    test('stintMissedWeeks resets when user is demoted back to level 5 (new stint)', () => {
+      const user = createUser('u1', 5);
+      // Week 1: miss at level 5 (stintMissedWeeks = 1)
+      // Weeks 2-4: 5 workouts each → progress to level 4, stintMissedWeeks resets to 0
+      // Week 5: miss at level 4 → demoted back to level 5, stintMissedWeeks resets to 0 (new stint)
+      const workouts = createWorkouts('u1', [3, 5, 5, 5, 3]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 6);
+
+      expect(stintMissedWeeks).toBe(0);
+    });
+
+    test('should NOT eliminate user who progressed from level 5 and was demoted back (Sibi scenario)', () => {
+      const user = createUser('u1', 5);
+      // Week 1: miss at level 5 → stintMissedWeeks = 1
+      // Weeks 2-4: clean at level 5 → progress to level 4, stintMissedWeeks reset to 0
+      // Week 5: miss at level 4 → demoted back to level 5, new stint, stintMissedWeeks = 0
+      const workouts = createWorkouts('u1', [3, 5, 5, 5, 3]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 6);
+      const eliminated = shouldBeEliminated(user, stintMissedWeeks);
+
+      expect(stintMissedWeeks).toBe(0);
+      expect(eliminated).toBe(false);
+    });
+
+    test('should eliminate user who misses twice in the same level-5 stint', () => {
+      const user = createUser('u1', 5);
+      // Weeks 1-2: miss at level 5 → stintMissedWeeks = 2 → eliminated
+      const workouts = createWorkouts('u1', [3, 3]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 3);
+      const eliminated = shouldBeEliminated(user, stintMissedWeeks);
+
+      expect(stintMissedWeeks).toBe(2);
+      expect(eliminated).toBe(true);
+    });
+
+    test('stintMissedWeeks counts only misses in the current stint after demotion', () => {
+      const user = createUser('u1', 5);
+      // Week 1: miss at level 5 (old stint, stintMissedWeeks = 1)
+      // Weeks 2-4: clean at level 5 → progress to level 4, reset to 0
+      // Week 5: miss at level 4 → demoted to level 5, new stint reset to 0
+      // Week 6: miss at level 5 (new stint, stintMissedWeeks = 1)
+      const workouts = createWorkouts('u1', [3, 5, 5, 5, 3, 3]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 7);
+
+      expect(stintMissedWeeks).toBe(1);
     });
   });
 
@@ -354,6 +419,75 @@ describe('Consistency Calculator Tests', () => {
 
       expect(update.newConsistencyLevel).toBe(3);
       expect(update.cleanWeeks).toBe(7);
+    });
+  });
+
+  describe('Second-chance reactivation (reactivatedAtWeek)', () => {
+    test('reactivated user is not re-eliminated if misses are all before reactivation week', () => {
+      // Weeks 1-2: miss at level 5 (would normally eliminate), reactivatedAtWeek = 3
+      const user: User = {
+        ...createUser('u1', 5),
+        specialRules: { reactivatedAtWeek: 3 },
+      };
+      const workouts = createWorkouts('u1', [3, 3, 5, 5]); // miss, miss, clean, clean
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 5);
+
+      expect(stintMissedWeeks).toBe(0);
+    });
+
+    test('second-chance user can still be eliminated after 2 new misses post-reactivation', () => {
+      // Weeks 1-2: miss (before reactivation), reactivatedAtWeek = 3
+      // Weeks 3-4: miss (after reactivation) → stintMissedWeeks = 2 → eliminated
+      const user: User = {
+        ...createUser('u1', 5),
+        specialRules: { reactivatedAtWeek: 3 },
+      };
+      const workouts = createWorkouts('u1', [3, 3, 3, 3]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 5);
+      const eliminated = shouldBeEliminated(user, stintMissedWeeks);
+
+      expect(stintMissedWeeks).toBe(2);
+      expect(eliminated).toBe(true);
+    });
+
+    test('second-chance user with 1 miss after reactivation is at risk but not eliminated', () => {
+      const user: User = {
+        ...createUser('u1', 5),
+        specialRules: { reactivatedAtWeek: 3 },
+      };
+      // Weeks 1-2: miss (before), week 3: miss (after), week 4: clean
+      const workouts = createWorkouts('u1', [3, 3, 3, 5]);
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 5);
+      const eliminated = shouldBeEliminated(user, stintMissedWeeks);
+
+      expect(stintMissedWeeks).toBe(1);
+      expect(eliminated).toBe(false);
+    });
+
+    test('reactivatedAtWeek after all completed weeks returns 0 (no weeks in new stint yet)', () => {
+      // reactivatedAtWeek = 5, but currentWeek = 5 so completedWeeks = 4
+      const user: User = {
+        ...createUser('u1', 5),
+        specialRules: { reactivatedAtWeek: 5 },
+      };
+      const workouts = createWorkouts('u1', [3, 3, 3, 3]); // all misses but before reactivation
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 5);
+
+      expect(stintMissedWeeks).toBe(0);
+    });
+
+    test('without reactivatedAtWeek, same history correctly counts pre-reactivation misses', () => {
+      // Same as above but WITHOUT reactivatedAtWeek — should still count the misses
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [3, 3]); // 2 misses → eliminated
+
+      const stintMissedWeeks = calculateStintMissedWeeks(user, workouts, 3);
+
+      expect(stintMissedWeeks).toBe(2);
     });
   });
 

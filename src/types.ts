@@ -10,6 +10,7 @@ export interface User {
   isActive: boolean;
   specialRules?: {
     startingLevel?: number; // For users like Subhash who start at 4 days
+    reactivatedAtWeek?: number; // Week from which a second-chance user's stint resets
   };
 }
 

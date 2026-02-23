@@ -36,7 +36,13 @@ function AppContent() {
     isActive: true,
   });
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<ActiveView>("workout");
+  const [activeView, setActiveView] = useState<ActiveView>(
+    () => (localStorage.getItem("activeView") as ActiveView) ?? "workout"
+  );
+
+  useEffect(() => {
+    localStorage.setItem("activeView", activeView);
+  }, [activeView]);
 
   // Recalculate user consistency metrics based on workout data
   const recalculateUserConsistency = () => {

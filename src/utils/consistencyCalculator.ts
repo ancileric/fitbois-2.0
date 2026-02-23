@@ -11,6 +11,7 @@ export interface ConsistencyUpdate {
   userId: string;
   cleanWeeks: number;
   missedWeeks: number;
+  stintMissedWeeks: number;
   newConsistencyLevel: 3 | 4 | 5;
   levelChanged: boolean;
   totalPoints: number;
@@ -184,6 +185,60 @@ const simulateProgression = (
 };
 
 /**
+ * Calculate the number of missed weeks in the user's *current* level-5 stint.
+ * The counter resets every time the user arrives at level 5 (whether by starting there,
+ * progressing down from 4→5, or being demoted back from 4→5).
+ */
+export const calculateStintMissedWeeks = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  currentWeek: number
+): number => {
+  const completedWeeks = currentWeek - 1;
+  if (completedWeeks <= 0) return 0;
+
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  const reactivatedAtWeek = user.specialRules?.reactivatedAtWeek;
+  const loopStart = reactivatedAtWeek ?? 1;
+
+  // If reactivatedAtWeek is set, start fresh at level 5 from that week
+  let simulatedLevel = reactivatedAtWeek ? 5 : startingLevel;
+  let consecutiveClean = 0;
+  let stintMissedWeeks = 0;
+
+  for (let week = loopStart; week <= completedWeeks; week++) {
+    const required = getRequiredWorkouts(simulatedLevel);
+    const completed = countCompletedWorkouts(user.id, workoutDays, week);
+    const isClean = completed >= required;
+
+    if (isClean) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        // Progressed to a lower (better) level — new stint begins if they return to 5 later
+        stintMissedWeeks = 0;
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        // Demoted to a higher (harder) level
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+        if (simulatedLevel === 5) {
+          // New level-5 stint begins — reset the counter
+          stintMissedWeeks = 0;
+        }
+      } else {
+        // Already at level 5 — count this miss against the current stint
+        stintMissedWeeks++;
+      }
+    }
+  }
+
+  return stintMissedWeeks;
+};
+
+/**
  * Simulation using pre-computed week statuses (for callers that don't pass workoutDays).
  * Re-evaluates completion against simulated levels using the completedWorkouts from each status.
  */
@@ -219,14 +274,15 @@ const simulateProgressionFromStatuses = (
 };
 
 /**
- * Check if user should be eliminated
+ * Check if user should be eliminated.
+ * Uses per-stint missed weeks: each time the user arrives at level 5 they get
+ * 2 misses before elimination; the counter resets on every new stint.
  */
 export const shouldBeEliminated = (
   user: User,
-  missedWeeks: number
+  stintMissedWeeks: number
 ): boolean => {
-  // Rule: Miss 2 weeks at 5 days/week → eliminated
-  return user.currentConsistencyLevel === 5 && missedWeeks >= 2;
+  return user.currentConsistencyLevel === 5 && stintMissedWeeks >= 2;
 };
 
 /**
@@ -246,6 +302,7 @@ export const calculateConsistencyUpdate = (
 
   const newConsistencyLevel = simulateProgression(user, workoutDays, currentWeek);
   const levelChanged = newConsistencyLevel !== user.currentConsistencyLevel;
+  const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
 
   // Points = completed goals (1 point each) + clean weeks (1 point each)
   const totalPoints = completedGoals + cleanWeeks;
@@ -254,6 +311,7 @@ export const calculateConsistencyUpdate = (
     userId: user.id,
     cleanWeeks,
     missedWeeks,
+    stintMissedWeeks,
     newConsistencyLevel,
     levelChanged,
     totalPoints
@@ -275,8 +333,8 @@ export const updateAllUsersConsistency = (
     const userCompletedGoals = goals.filter(g => g.userId === user.id && g.isCompleted).length;
     const update = calculateConsistencyUpdate(user, workoutDays, currentWeek, userCompletedGoals);
 
-    // Check for elimination
-    const eliminated = shouldBeEliminated(user, update.missedWeeks);
+    // Check for elimination using per-stint missed weeks
+    const eliminated = shouldBeEliminated(user, update.stintMissedWeeks);
 
     return {
       ...user,
