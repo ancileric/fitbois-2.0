@@ -491,6 +491,135 @@ describe('Consistency Calculator Tests', () => {
     });
   });
 
+  describe('Steps rule', () => {
+    // Helper to build workouts with explicit workoutType per day
+    const createWorkoutsWithTypes = (
+      userId: string,
+      weeks: { count: number; stepsDay?: boolean }[]
+    ): WorkoutDay[] => {
+      const workouts: WorkoutDay[] = [];
+      weeks.forEach(({ count, stepsDay = false }, index) => {
+        const week = index + 1;
+        for (let day = 1; day <= count; day++) {
+          const isLastDay = day === count;
+          workouts.push({
+            id: `${userId}-w${week}-d${day}`,
+            userId,
+            week,
+            dayOfWeek: day,
+            date: `2026-01-${19 + (week - 1) * 7 + day}`,
+            isCompleted: true,
+            markedBy: 'user',
+            timestamp: new Date().toISOString(),
+            workoutType: stepsDay && isLastDay ? 'steps' : 'workout',
+          });
+        }
+      });
+      return workouts;
+    };
+
+    test('Level 5: 4 workouts + 1 steps day = clean week (steps count at level 5)', () => {
+      const user = createUser('u1', 5);
+      // 4 real workouts + 1 steps = 5 total → clean at level 5
+      const workouts = createWorkoutsWithTypes('u1', [{ count: 5, stepsDay: true }]);
+
+      const status = calculateWeekStatus(user, workouts, 1, undefined, 5);
+
+      expect(status.completedWorkouts).toBe(5);
+      expect(status.isComplete).toBe(true);
+    });
+
+    test('Level 4: 4 workouts + 1 steps day = clean week (steps ignored, 4 real workouts suffice)', () => {
+      const user = createUser('u1', 4);
+      // 4 real workouts + 1 steps = clean because the 4 real workouts meet the level-4 requirement
+      const workouts = createWorkoutsWithTypes('u1', [{ count: 5, stepsDay: true }]);
+
+      const status = calculateWeekStatus(user, workouts, 1, undefined, 4);
+
+      // steps excluded → 4 real workouts counted; 4 >= 4 required
+      expect(status.completedWorkouts).toBe(4);
+      expect(status.isComplete).toBe(true);
+    });
+
+    test('Level 4: 3 workouts + 1 steps day = missed week (steps ignored, only 3 real workouts)', () => {
+      const user = createUser('u1', 4);
+      // 3 real workouts + 1 steps; steps excluded → only 3 counted; need 4
+      const workouts = createWorkoutsWithTypes('u1', [{ count: 4, stepsDay: true }]);
+
+      const status = calculateWeekStatus(user, workouts, 1, undefined, 4);
+
+      expect(status.completedWorkouts).toBe(3);
+      expect(status.isComplete).toBe(false);
+    });
+
+    test('Level 3: 3 workouts + 1 steps day = missed week (steps ignored, only 3 real workouts)', () => {
+      const user = createUser('u1', 5);
+      // Reach level 3 via 6 clean weeks, then week 7 has 3 real + 1 steps
+      const leadIn = createWorkoutsWithTypes('u1', [
+        { count: 5 }, { count: 5 }, { count: 5 },
+        { count: 4 }, { count: 4 }, { count: 4 },
+      ]);
+      const week7 = createWorkoutsWithTypes('u1', [{ count: 4, stepsDay: true }]);
+      // Shift week7 workout week numbers to 7
+      const week7Adjusted = week7.map(w => ({ ...w, week: 7 }));
+
+      const update = calculateConsistencyUpdate(user, [...leadIn, ...week7Adjusted], 8, 0);
+
+      // 3 real workouts at level 3 is not enough (need 4) → regresses to level 4
+      expect(update.newConsistencyLevel).toBe(4);
+    });
+
+    test('Historical workouts with undefined workoutType still count (not treated as steps)', () => {
+      const user = createUser('u1', 4);
+      // Legacy workouts created before workoutType field existed have undefined type
+      const legacyWorkouts: WorkoutDay[] = Array.from({ length: 4 }, (_, i) => ({
+        id: `u1-w1-d${i + 1}`,
+        userId: 'u1',
+        week: 1,
+        dayOfWeek: i + 1,
+        date: `2026-01-${20 + i}`,
+        isCompleted: true,
+        markedBy: 'user' as const,
+        timestamp: new Date().toISOString(),
+        // workoutType intentionally omitted (undefined)
+      }));
+
+      const status = calculateWeekStatus(user, legacyWorkouts, 1, undefined, 4);
+
+      // All 4 legacy workouts should count even though workoutType is undefined
+      expect(status.completedWorkouts).toBe(4);
+      expect(status.isComplete).toBe(true);
+    });
+
+    test('Progression simulation uses level-aware step filtering', () => {
+      const user = createUser('u1', 5);
+      // At level 5: 4 workouts + 1 steps × 3 weeks → steps count → 3 clean weeks → progress to 4
+      const workouts = createWorkoutsWithTypes('u1', [
+        { count: 5, stepsDay: true },
+        { count: 5, stepsDay: true },
+        { count: 5, stepsDay: true },
+      ]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 4, 0);
+
+      expect(update.newConsistencyLevel).toBe(4);
+    });
+
+    test('Level-4 stint: steps day does not prevent missed-week counting', () => {
+      const user = createUser('u1', 5);
+      // 3 clean at level 5 → level 4; then 3 real + 1 steps at level 4 → missed
+      const workouts = createWorkoutsWithTypes('u1', [
+        { count: 5 }, { count: 5 }, { count: 5 },
+        { count: 4, stepsDay: true }, // only 3 real workouts at level 4
+      ]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 5, 0);
+
+      // Missed at level 4 → back to level 5
+      expect(update.newConsistencyLevel).toBe(5);
+    });
+  });
+
   describe('Edge Cases', () => {
     test('should handle user with no workout data', () => {
       const user = createUser('u1', 5);

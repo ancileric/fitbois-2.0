@@ -18,17 +18,20 @@ export interface ConsistencyUpdate {
 }
 
 /**
- * Count completed workouts for a user in a given week
+ * Count completed workouts for a user in a given week.
+ * When simulatedLevel < 5, steps days are excluded from the count.
  */
 const countCompletedWorkouts = (
   userId: string,
   workoutDays: WorkoutDay[],
-  week: number
+  week: number,
+  simulatedLevel: number = 5
 ): number => {
   return workoutDays.filter(w =>
     w.userId === userId &&
     w.week === week &&
-    w.isCompleted
+    w.isCompleted &&
+    (simulatedLevel >= 5 || w.workoutType !== 'steps')
   ).length;
 };
 
@@ -40,9 +43,11 @@ export const calculateWeekStatus = (
   user: User,
   workoutDays: WorkoutDay[],
   week: number,
-  requiredWorkoutsOverride?: number
+  requiredWorkoutsOverride?: number,
+  simulatedLevel?: number
 ): WeekStatus => {
-  const completedWorkouts = countCompletedWorkouts(user.id, workoutDays, week);
+  const level = simulatedLevel ?? user.currentConsistencyLevel;
+  const completedWorkouts = countCompletedWorkouts(user.id, workoutDays, week, level);
   const requiredWorkouts = requiredWorkoutsOverride ?? getRequiredWorkouts(user.currentConsistencyLevel);
 
   return {
@@ -72,7 +77,7 @@ export const calculateAllWeekStatuses = (
 
   for (let week = 1; week <= completedWeeks; week++) {
     const required = getRequiredWorkouts(simulatedLevel);
-    const status = calculateWeekStatus(user, workoutDays, week, required);
+    const status = calculateWeekStatus(user, workoutDays, week, required, simulatedLevel);
     weekStatuses.push(status);
 
     if (status.isComplete) {
@@ -164,7 +169,7 @@ const simulateProgression = (
 
   for (let week = 1; week <= completedWeeks; week++) {
     const required = getRequiredWorkouts(simulatedLevel);
-    const completed = countCompletedWorkouts(user.id, workoutDays, week);
+    const completed = countCompletedWorkouts(user.id, workoutDays, week, simulatedLevel);
     const isClean = completed >= required;
 
     if (isClean) {
@@ -208,7 +213,7 @@ export const calculateStintMissedWeeks = (
 
   for (let week = loopStart; week <= completedWeeks; week++) {
     const required = getRequiredWorkouts(simulatedLevel);
-    const completed = countCompletedWorkouts(user.id, workoutDays, week);
+    const completed = countCompletedWorkouts(user.id, workoutDays, week, simulatedLevel);
     const isClean = completed >= required;
 
     if (isClean) {

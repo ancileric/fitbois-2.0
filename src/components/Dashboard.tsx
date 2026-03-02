@@ -5,7 +5,7 @@ import {
   getChallengeProgress,
   getDaysUntilStart,
 } from "../utils/dateUtils";
-import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
+import { calculateAllWeekStatuses, calculateStintMissedWeeks } from "../utils/consistencyCalculator";
 import { Calendar, Users, ChevronDown, ChevronUp } from "lucide-react";
 
 interface DashboardProps {
@@ -95,12 +95,15 @@ const Dashboard: React.FC<DashboardProps> = ({
         const completionRate =
           totalRequired > 0 ? totalCompleted / totalRequired : 1;
 
+        const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
+
         return {
           ...user,
           completedGoals,
           difficultGoalsCompleted,
           totalWorkouts,
           completionRate,
+          stintMissedWeeks,
         };
       })
       .sort((a, b) => {
@@ -125,7 +128,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const eliminationRiskUsers = new Set(
     leaderboardData
       .filter(
-        (u) => u.currentConsistencyLevel === 5 && u.missedWeeks === 1,
+        (u) => u.currentConsistencyLevel === 5 && u.stintMissedWeeks === 1,
       )
       .map((u) => u.id),
   );

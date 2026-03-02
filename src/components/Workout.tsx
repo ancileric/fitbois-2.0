@@ -6,6 +6,7 @@ import {
   Users,
   Calendar,
   ChevronDown,
+  Activity,
 } from "lucide-react";
 import { getCurrentWeek, getDaysUntilStart } from "../utils/dateUtils";
 
@@ -52,12 +53,42 @@ const Workout: React.FC<WorkoutProps> = ({
     );
   };
 
-  // Toggle workout completion
-  const toggleWorkout = (userId: string, week: number, dayOfWeek: number) => {
+  // Cycle through: empty → workout → steps → empty
+  // Only 1 steps day allowed per user per week; if slot taken, workout cycles to empty instead.
+  const cycleWorkout = (user: User, week: number, dayOfWeek: number) => {
+    const userId = user.id;
     const existing = getWorkoutDay(userId, week, dayOfWeek);
-    // Create a new Date object to avoid mutating startDate
     const date = new Date(startDate.getTime());
     date.setDate(date.getDate() + (week - 1) * 7 + (dayOfWeek - 1));
+
+    const stepsThisWeek = workoutDays.filter(
+      (w) =>
+        w.userId === userId &&
+        w.week === week &&
+        w.isCompleted &&
+        w.workoutType === "steps",
+    ).length;
+
+    let isCompleted: boolean;
+    let workoutType: string | undefined;
+
+    if (!existing || !existing.isCompleted) {
+      // empty → workout
+      isCompleted = true;
+      workoutType = "workout";
+    } else if (existing.workoutType !== "steps" && stepsThisWeek === 0) {
+      // workout → steps (steps slot available)
+      isCompleted = true;
+      workoutType = "steps";
+    } else if (existing.workoutType !== "steps" && stepsThisWeek > 0) {
+      // workout → empty (steps slot already taken by another day)
+      isCompleted = false;
+      workoutType = undefined;
+    } else {
+      // steps → empty
+      isCompleted = false;
+      workoutType = undefined;
+    }
 
     const workoutDay: WorkoutDay = {
       id:
@@ -66,10 +97,10 @@ const Workout: React.FC<WorkoutProps> = ({
       week,
       dayOfWeek,
       date: date.toISOString().split("T")[0],
-      isCompleted: existing ? !existing.isCompleted : true,
+      isCompleted,
       markedBy: "admin",
       timestamp: new Date().toISOString(),
-      workoutType: existing?.workoutType,
+      workoutType,
       notes: existing?.notes,
     };
 
@@ -80,18 +111,21 @@ const Workout: React.FC<WorkoutProps> = ({
   const getUserWeekStats = (userId: string, week: number) => {
     const user = users.find((u) => u.id === userId);
     const requiredDays = user ? getRequiredWorkouts(user.currentConsistencyLevel) : 5;
+    const level = user ? user.currentConsistencyLevel : 5;
 
-    // Get completed workouts from database for this user and week
-    const completedWorkouts = workoutDays.filter(
-      (w) => w.userId === userId && w.week === week && w.isCompleted,
-    );
-
-    const completedDays = completedWorkouts.length;
+    // Steps don't count toward the requirement at level 4/3
+    const effectiveWorkouts = workoutDays.filter(
+      (w) =>
+        w.userId === userId &&
+        w.week === week &&
+        w.isCompleted &&
+        (level >= 5 || w.workoutType !== "steps"),
+    ).length;
 
     return {
-      completed: completedDays,
+      completed: effectiveWorkouts,
       required: requiredDays,
-      isComplete: completedDays >= requiredDays,
+      isComplete: effectiveWorkouts >= requiredDays,
     };
   };
 
@@ -118,13 +152,16 @@ const Workout: React.FC<WorkoutProps> = ({
       activeUsers.forEach((user) => {
         // Get user's required workouts per week based on their consistency level
         const requiredWorkouts = getRequiredWorkouts(user.currentConsistencyLevel);
+        const level = user.currentConsistencyLevel;
 
-        // Get actual completed workouts for this user and week from database
-        const userWeekWorkouts = workoutDays.filter(
-          (w) => w.userId === user.id && w.week === week && w.isCompleted,
-        );
-
-        const completedWorkouts = userWeekWorkouts.length;
+        // Steps don't count toward the requirement at level 4/3
+        const completedWorkouts = workoutDays.filter(
+          (w) =>
+            w.userId === user.id &&
+            w.week === week &&
+            w.isCompleted &&
+            (level >= 5 || w.workoutType !== "steps"),
+        ).length;
 
         totalWorkoutsRequired += requiredWorkouts;
         totalWorkoutsCompleted += completedWorkouts;
@@ -271,6 +308,7 @@ const Workout: React.FC<WorkoutProps> = ({
                         dayIndex + 1,
                       );
                       const isCompleted = workoutDay?.isCompleted || false;
+                      const isSteps = isCompleted && workoutDay?.workoutType === "steps";
 
                       return (
                         <div key={day} className="flex flex-col items-center">
@@ -279,15 +317,19 @@ const Workout: React.FC<WorkoutProps> = ({
                           </span>
                           <button
                             onClick={() =>
-                              toggleWorkout(user.id, selectedWeek, dayIndex + 1)
+                              cycleWorkout(user, selectedWeek, dayIndex + 1)
                             }
                             className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
-                              isCompleted
-                                ? "bg-green-500 text-white"
-                                : "bg-gray-200 text-gray-400"
+                              isSteps
+                                ? "bg-blue-500 text-white"
+                                : isCompleted
+                                  ? "bg-green-500 text-white"
+                                  : "bg-gray-200 text-gray-400"
                             }`}
                           >
-                            {isCompleted ? (
+                            {isSteps ? (
+                              <Activity size={18} />
+                            ) : isCompleted ? (
                               <CheckCircle size={18} />
                             ) : (
                               <XCircle size={18} />
@@ -383,25 +425,26 @@ const Workout: React.FC<WorkoutProps> = ({
                           dayIndex + 1,
                         );
                         const isCompleted = workoutDay?.isCompleted || false;
+                        const isSteps = isCompleted && workoutDay?.workoutType === "steps";
 
                         return (
                           <td key={day} className="py-4 px-3 text-center">
                             <div className="flex justify-center">
                               <button
                                 onClick={() =>
-                                  toggleWorkout(
-                                    user.id,
-                                    selectedWeek,
-                                    dayIndex + 1,
-                                  )
+                                  cycleWorkout(user, selectedWeek, dayIndex + 1)
                                 }
                                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                                  isCompleted
-                                    ? "bg-green-500 text-white hover:bg-green-600"
-                                    : "bg-gray-200 text-gray-400 hover:bg-gray-300"
+                                  isSteps
+                                    ? "bg-blue-500 text-white hover:bg-blue-600"
+                                    : isCompleted
+                                      ? "bg-green-500 text-white hover:bg-green-600"
+                                      : "bg-gray-200 text-gray-400 hover:bg-gray-300"
                                 }`}
                               >
-                                {isCompleted ? (
+                                {isSteps ? (
+                                  <Activity size={16} />
+                                ) : isCompleted ? (
                                   <CheckCircle size={16} />
                                 ) : (
                                   <XCircle size={16} />
