@@ -9,6 +9,7 @@ import {
   Activity,
 } from "lucide-react";
 import { getCurrentWeek, getDaysUntilStart } from "../utils/dateUtils";
+import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
 
 interface WorkoutProps {
   users: User[];
@@ -107,13 +108,36 @@ const Workout: React.FC<WorkoutProps> = ({
     onUpdateWorkoutDay(workoutDay);
   };
 
+  // Simulated week statuses per user — historically accurate required workouts per week
+  const userWeekStatusesMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof calculateAllWeekStatuses>>();
+    users.forEach((user) => {
+      map.set(user.id, calculateAllWeekStatuses(user, workoutDays, currentWeek));
+    });
+    return map;
+  }, [users, workoutDays, currentWeek]);
+
   // Calculate weekly stats for each user using database data
   const getUserWeekStats = (userId: string, week: number) => {
     const user = users.find((u) => u.id === userId);
-    const requiredDays = user ? getRequiredWorkouts(user.currentConsistencyLevel) : 5;
-    const level = user ? user.currentConsistencyLevel : 5;
+    if (!user) return { completed: 0, required: 5, isComplete: false };
 
-    // Steps don't count toward the requirement at level 4/3
+    // For past weeks, use the historically-simulated level (not current level)
+    if (week < currentWeek) {
+      const weekStatuses = userWeekStatusesMap.get(userId) || [];
+      const weekStatus = weekStatuses[week - 1];
+      if (weekStatus) {
+        return {
+          completed: weekStatus.completedWorkouts,
+          required: weekStatus.requiredWorkouts,
+          isComplete: weekStatus.isComplete,
+        };
+      }
+    }
+
+    // For the current/future weeks, use the user's current level
+    const level = user.currentConsistencyLevel;
+    const requiredDays = getRequiredWorkouts(level);
     const effectiveWorkouts = workoutDays.filter(
       (w) =>
         w.userId === userId &&
@@ -150,18 +174,33 @@ const Workout: React.FC<WorkoutProps> = ({
       let usersWhoMetRequirement = 0;
 
       activeUsers.forEach((user) => {
-        // Get user's required workouts per week based on their consistency level
-        const requiredWorkouts = getRequiredWorkouts(user.currentConsistencyLevel);
-        const level = user.currentConsistencyLevel;
+        let requiredWorkouts: number;
+        let completedWorkouts: number;
 
-        // Steps don't count toward the requirement at level 4/3
-        const completedWorkouts = workoutDays.filter(
-          (w) =>
-            w.userId === user.id &&
-            w.week === week &&
-            w.isCompleted &&
-            (level >= 5 || w.workoutType !== "steps"),
-        ).length;
+        if (week < currentWeek) {
+          // For past weeks, use the historically-simulated required workouts
+          const weekStatuses = userWeekStatusesMap.get(user.id) || [];
+          const weekStatus = weekStatuses[week - 1];
+          if (weekStatus) {
+            requiredWorkouts = weekStatus.requiredWorkouts;
+            completedWorkouts = weekStatus.completedWorkouts;
+          } else {
+            requiredWorkouts = getRequiredWorkouts(user.currentConsistencyLevel);
+            completedWorkouts = 0;
+          }
+        } else {
+          // For current/future weeks, use the user's current level
+          const level = user.currentConsistencyLevel;
+          requiredWorkouts = getRequiredWorkouts(level);
+          // Steps don't count toward the requirement at level 4/3
+          completedWorkouts = workoutDays.filter(
+            (w) =>
+              w.userId === user.id &&
+              w.week === week &&
+              w.isCompleted &&
+              (level >= 5 || w.workoutType !== "steps"),
+          ).length;
+        }
 
         totalWorkoutsRequired += requiredWorkouts;
         totalWorkoutsCompleted += completedWorkouts;
@@ -184,7 +223,7 @@ const Workout: React.FC<WorkoutProps> = ({
         totalWorkoutsCompleted,
       };
     });
-  }, [users, workoutDays, weeks]);
+  }, [users, workoutDays, weeks, currentWeek, userWeekStatusesMap]);
 
   return (
     <div className="space-y-4">
