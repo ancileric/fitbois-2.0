@@ -5,7 +5,8 @@ import {
   getChallengeProgress,
   getDaysUntilStart,
 } from "../utils/dateUtils";
-import { calculateAllWeekStatuses, calculateStintMissedWeeks } from "../utils/consistencyCalculator";
+import { calculateAllWeekStatuses, calculateStintMissedWeeks, calculateLevelHistory, LevelPoint } from "../utils/consistencyCalculator";
+import LevelTimeline from "./LevelTimeline";
 import { Calendar, Users, ChevronDown, ChevronUp } from "lucide-react";
 
 interface DashboardProps {
@@ -55,6 +56,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     users[0]?.id || "",
   );
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showLevelProgress, setShowLevelProgress] = useState(false);
+  const [expandedLevelUsers, setExpandedLevelUsers] = useState<Set<string>>(new Set());
 
   // Calculate current week and challenge progress
   const currentWeek = getCurrentWeek();
@@ -256,6 +259,41 @@ const Dashboard: React.FC<DashboardProps> = ({
     return { weeks, months };
   }, [selectedHeatmapUser, users, workoutDays, goals]);
 
+  // Compute level history per user
+  const levelHistories = useMemo(() => {
+    const map = new Map<string, LevelPoint[]>();
+    users.forEach(user => {
+      map.set(user.id, calculateLevelHistory(user, workoutDays, currentWeek));
+    });
+    return map;
+  }, [users, workoutDays, currentWeek]);
+
+  const toggleLevelUser = (userId: string) => {
+    setExpandedLevelUsers(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const getLevelProgressSummary = (history: LevelPoint[]): string => {
+    let lastProgression: { level: number; week: number } | null = null;
+    for (let i = 1; i < history.length; i++) {
+      if (history[i].level < history[i - 1].level) {
+        lastProgression = { level: history[i].level, week: history[i].week };
+      }
+    }
+    if (lastProgression) {
+      return `Reached L${lastProgression.level} on Week ${lastProgression.week}`;
+    }
+    const currentLevel = history[history.length - 1]?.level;
+    return currentLevel ? `Still at L${currentLevel}` : '';
+  };
+
   return (
     <div className="space-y-6">
       {/* Header with Progress */}
@@ -446,6 +484,74 @@ const Dashboard: React.FC<DashboardProps> = ({
             );
           })}
         </div>
+      </div>
+
+      {/* Level Progress - Collapsible */}
+      <div className="bg-white rounded-xl border border-gray-100">
+        <button
+          onClick={() => setShowLevelProgress(!showLevelProgress)}
+          className="w-full p-4 flex items-center justify-between text-left"
+        >
+          <h2 className="text-lg font-semibold text-gray-900">Level Progress</h2>
+          {showLevelProgress ? (
+            <ChevronUp className="w-5 h-5 text-gray-400" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-gray-400" />
+          )}
+        </button>
+
+        {showLevelProgress && (
+          <div className="px-4 pb-4 space-y-2">
+            {users
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(user => {
+                const history = levelHistories.get(user.id) ?? [];
+                const isExpanded = expandedLevelUsers.has(user.id);
+                const summary = getLevelProgressSummary(history);
+                const currentLevel = history[history.length - 1]?.level ?? user.currentConsistencyLevel;
+                const levelBadgeColor =
+                  currentLevel === 3 ? 'bg-green-100 text-green-700' :
+                  currentLevel === 4 ? 'bg-amber-100 text-amber-700' :
+                  'bg-orange-100 text-orange-700';
+
+                return (
+                  <div key={user.id} className="border border-gray-100 rounded-lg">
+                    <button
+                      onClick={() => toggleLevelUser(user.id)}
+                      className="w-full p-3 flex items-center justify-between text-left hover:bg-gray-50 rounded-lg"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-8 h-8 bg-primary-500 text-white rounded-full flex items-center justify-center text-sm flex-shrink-0">
+                          {user.avatar || user.name.charAt(0)}
+                        </span>
+                        <span className="font-medium text-gray-900 text-sm truncate">{user.name}</span>
+                        {!user.isActive && (
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-xs rounded flex-shrink-0">
+                            Eliminated
+                          </span>
+                        )}
+                        <span className={`px-1.5 py-0.5 text-xs font-medium rounded flex-shrink-0 ${levelBadgeColor}`}>
+                          L{currentLevel}
+                        </span>
+                        <span className="text-xs text-gray-400 hidden sm:block flex-shrink-0">{summary}</span>
+                      </div>
+                      {isExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0 ml-2" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0 ml-2" />
+                      )}
+                    </button>
+                    {isExpanded && (
+                      <div className="px-3 pb-3">
+                        <p className="text-xs text-gray-400 mb-2 sm:hidden">{summary}</p>
+                        <LevelTimeline user={user} levelHistory={history} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* Activity Heatmap - Collapsible */}

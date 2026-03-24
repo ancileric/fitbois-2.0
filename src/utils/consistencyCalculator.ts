@@ -323,6 +323,55 @@ export const calculateConsistencyUpdate = (
   };
 };
 
+export interface LevelPoint {
+  week: number;
+  level: number;    // 3, 4, or 5
+  isClean: boolean; // false for current in-progress week
+}
+
+/**
+ * Build a per-week level history for a user.
+ * Returns one LevelPoint per week from 1 through currentWeek (inclusive).
+ * The last point (currentWeek) always has isClean=false (still in progress).
+ */
+export const calculateLevelHistory = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  currentWeek: number
+): LevelPoint[] => {
+  const completedWeeks = currentWeek - 1;
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  let simulatedLevel = startingLevel as number;
+  let consecutiveClean = 0;
+  const points: LevelPoint[] = [];
+
+  for (let week = 1; week <= completedWeeks; week++) {
+    const required = getRequiredWorkouts(simulatedLevel);
+    const completed = countCompletedWorkouts(user.id, workoutDays, week, simulatedLevel);
+    const isClean = completed >= required;
+    points.push({ week, level: simulatedLevel, isClean });
+
+    if (isClean) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+      }
+    }
+  }
+
+  if (currentWeek > 0) {
+    points.push({ week: currentWeek, level: simulatedLevel, isClean: false });
+  }
+
+  return points;
+};
+
 /**
  * Update all users' consistency metrics
  */
