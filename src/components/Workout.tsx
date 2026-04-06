@@ -8,7 +8,7 @@ import {
   ChevronDown,
   Activity,
 } from "lucide-react";
-import { getCurrentWeek, getDaysUntilStart } from "../utils/dateUtils";
+import { getCurrentWeek, getDaysUntilStart, getWeekDates, formatDayLabel } from "../utils/dateUtils";
 import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
 
 interface WorkoutProps {
@@ -39,6 +39,7 @@ const Workout: React.FC<WorkoutProps> = ({
 
   const weeks = Array.from({ length: totalWeeks }, (_, i) => i + 1);
   const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const weekDates = getWeekDates(adminSettings.challengeStartDate, selectedWeek);
 
   // Get workout data for a specific user, week, and day
   const getWorkoutDay = (
@@ -351,8 +352,11 @@ const Workout: React.FC<WorkoutProps> = ({
 
                       return (
                         <div key={day} className="flex flex-col items-center">
-                          <span className="text-xs text-gray-500 mb-1">
+                          <span className="text-xs font-medium text-gray-500">
                             {day.charAt(0)}
+                          </span>
+                          <span className="text-xs text-gray-400 mb-1">
+                            {formatDayLabel(weekDates[dayIndex]).split(' ')[1]}
                           </span>
                           <button
                             onClick={() =>
@@ -394,12 +398,13 @@ const Workout: React.FC<WorkoutProps> = ({
                 <th className="text-center py-3 px-3 font-medium text-gray-900 w-16">
                   Level
                 </th>
-                {daysOfWeek.map((day) => (
+                {daysOfWeek.map((day, dayIndex) => (
                   <th
                     key={day}
                     className="text-center py-3 px-3 font-medium text-gray-900 w-16"
                   >
-                    {day}
+                    <div>{day}</div>
+                    <div className="text-xs font-normal text-gray-500">{formatDayLabel(weekDates[dayIndex])}</div>
                   </th>
                 ))}
                 <th className="text-center py-3 px-4 font-medium text-gray-900 w-20">

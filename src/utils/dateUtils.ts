@@ -94,6 +94,30 @@ export const getChallengeProgress = (
 };
 
 /**
+ * Get the 7 dates (Mon–Sun) for a given challenge week number.
+ * Returns Date objects representing each day in IST.
+ */
+export const getWeekDates = (challengeStartDate: string = CHALLENGE_START_DATE, weekNumber: number): Date[] => {
+  const monday = parseISTDate(challengeStartDate);
+  monday.setDate(monday.getDate() + (weekNumber - 1) * 7);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday.getTime());
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+};
+
+/**
+ * Format a Date to "Apr 6" style label (uses UTC fields since dates are stored at IST midnight in UTC)
+ */
+export const formatDayLabel = (date: Date): string => {
+  const istDate = new Date(date.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+  const month = istDate.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  const day = istDate.getUTCDate();
+  return `${month} ${day}`;
+};
+
+/**
  * Format a date to YYYY-MM-DD in IST
  */
 export const formatISTDate = (date: Date): string => {
