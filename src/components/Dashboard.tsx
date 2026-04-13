@@ -127,6 +127,18 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
   }, [users, goals, workoutDays, currentWeek]);
 
+  // Eliminated users data
+  const eliminatedData = useMemo(() => {
+    return users
+      .filter((u) => !u.isActive)
+      .map((user) => {
+        const userGoals = goals.filter((g) => g.userId === user.id);
+        const completedGoals = userGoals.filter((g) => g.isCompleted).length;
+        return { ...user, completedGoals };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [users, goals]);
+
   // Risk detection
   const eliminationRiskUsers = new Set(
     leaderboardData
@@ -484,6 +496,65 @@ const Dashboard: React.FC<DashboardProps> = ({
             );
           })}
         </div>
+
+        {/* Eliminated Section */}
+        {eliminatedData.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Eliminated
+            </h3>
+            <div className="space-y-2">
+              {eliminatedData.map((user) => (
+                <div key={user.id} className="p-3 md:p-4 rounded-lg border-2 border-gray-200 bg-gray-50 opacity-60">
+                  {/* Mobile */}
+                  <div className="md:hidden flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-9 h-9 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
+                        {user.avatar || user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-500 text-sm line-through">{user.name}</h3>
+                        <p className="text-xs text-gray-400">Level {user.currentConsistencyLevel}</p>
+                      </div>
+                    </div>
+                    <span className="px-1.5 py-0.5 bg-gray-200 text-gray-500 text-xs font-medium rounded">
+                      Eliminated
+                    </span>
+                  </div>
+                  {/* Desktop */}
+                  <div className="hidden md:flex md:items-center md:justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-10 h-10 bg-gray-400 text-white rounded-full flex items-center justify-center">
+                        {user.avatar || user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-500 line-through">{user.name}</h3>
+                        <p className="text-sm text-gray-400">Level {user.currentConsistencyLevel}</p>
+                      </div>
+                      <span className="px-2 py-1 bg-gray-200 text-gray-500 text-xs font-medium rounded">
+                        Eliminated
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-6 text-center">
+                      <div>
+                        <div className="text-lg font-bold text-gray-400">{user.cleanWeeks}</div>
+                        <div className="text-xs text-gray-400">Clean Weeks</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold text-gray-400">{user.missedWeeks}</div>
+                        <div className="text-xs text-gray-400">Missed Weeks</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold text-gray-400">{user.completedGoals}</div>
+                        <div className="text-xs text-gray-400">Goals Done</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Level Progress - Collapsible */}
