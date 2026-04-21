@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   User,
   Goal,
@@ -14,14 +14,59 @@ import Dashboard from "./components/Dashboard";
 import Goals from "./components/Goals";
 import Admin from "./components/Admin";
 import ErrorBoundary from "./components/ErrorBoundary";
+import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
-import { generateMockData } from "./utils/mockData";
 import { apiService } from "./services/api";
 import { updateAllUsersConsistency } from "./utils/consistencyCalculator";
 import { getCurrentWeek } from "./utils/dateUtils";
 
 type ActiveView = "workout" | "goals" | "dashboard" | "admin";
+
+const SNAPSHOT_KEY = "fitbois:snapshot";
+const SNAPSHOT_VERSION = 1;
+const RETRY_BACKOFF_MS = [5000, 10000, 20000, 30000];
+
+interface Snapshot {
+  version: number;
+  savedAt: number;
+  users: User[];
+  workoutDays: WorkoutDay[];
+  goals: Goal[];
+  weeklyPlans: WeeklyPlan[];
+}
+
+const readSnapshot = (): Snapshot | null => {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Snapshot;
+    if (parsed.version !== SNAPSHOT_VERSION) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeSnapshot = (snap: Omit<Snapshot, "version" | "savedAt">): void => {
+  try {
+    const payload: Snapshot = {
+      version: SNAPSHOT_VERSION,
+      savedAt: Date.now(),
+      ...snap,
+    };
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(payload));
+  } catch {
+    // Quota exceeded or localStorage disabled — non-fatal.
+  }
+};
+
+const userConsistencyEqual = (a: User, b: User): boolean =>
+  a.cleanWeeks === b.cleanWeeks &&
+  a.missedWeeks === b.missedWeeks &&
+  a.currentConsistencyLevel === b.currentConsistencyLevel &&
+  a.totalPoints === b.totalPoints &&
+  a.isActive === b.isActive;
 
 function AppContent() {
   const { showToast } = useToast();
@@ -31,7 +76,7 @@ function AppContent() {
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
   const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>([]);
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
+  const [adminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
     challengeEndDate: "2026-07-31",
     currentWeek: 1,
@@ -41,13 +86,19 @@ function AppContent() {
   const [activeView, setActiveView] = useState<ActiveView>(
     () => (localStorage.getItem("activeView") as ActiveView) ?? "workout"
   );
+  const [isOffline, setIsOffline] = useState(false);
+  const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAttemptRef = useRef(0);
 
   useEffect(() => {
     localStorage.setItem("activeView", activeView);
   }, [activeView]);
 
-  // Recalculate user consistency metrics based on workout data
-  const recalculateUserConsistency = () => {
+  const recalculateUserConsistency = useCallback(() => {
     setUsers((currentUsers) => {
       const currentWeek = getCurrentWeek();
       const goalData = goals.map((g) => ({
@@ -63,174 +114,191 @@ function AppContent() {
         weeklyPlans,
       );
 
-      // Log changes and update database
-      updatedUsers.forEach((updatedUser) => {
-        const originalUser = currentUsers.find(
-          (u: User) => u.id === updatedUser.id,
-        );
-        if (
-          originalUser &&
-          (originalUser.cleanWeeks !== updatedUser.cleanWeeks ||
-            originalUser.missedWeeks !== updatedUser.missedWeeks ||
-            originalUser.currentConsistencyLevel !==
-              updatedUser.currentConsistencyLevel ||
-            originalUser.totalPoints !== updatedUser.totalPoints ||
-            originalUser.isActive !== updatedUser.isActive)
-        ) {
-          console.log(`🔄 Auto-updating consistency for ${updatedUser.name}:`, {
-            cleanWeeks: `${originalUser.cleanWeeks} → ${updatedUser.cleanWeeks}`,
-            missedWeeks: `${originalUser.missedWeeks} → ${updatedUser.missedWeeks}`,
-            level: `${originalUser.currentConsistencyLevel} → ${updatedUser.currentConsistencyLevel}`,
-            points: `${originalUser.totalPoints} → ${updatedUser.totalPoints}`,
-            active: `${originalUser.isActive} → ${updatedUser.isActive}`,
+      if (!isOffline) {
+        updatedUsers
+          .filter((u) => {
+            const original = currentUsers.find((o) => o.id === u.id);
+            return original && !userConsistencyEqual(original, u);
+          })
+          .forEach((u) => {
+            apiService.updateUser(u.id, u).catch((error) => {
+              console.error("Error updating user in database:", error);
+            });
           });
-
-          // Update in database
-          apiService.updateUser(updatedUser.id, updatedUser).catch((error) => {
-            console.error("Error updating user in database:", error);
-          });
-        }
-      });
+      }
 
       return updatedUsers;
     });
-  };
+  }, [goals, workoutDays, weeklyPlans, isOffline]);
 
-  useEffect(() => {
-    // Load data from SQLite database
-    const loadData = async () => {
-      try {
-        console.log("🔍 Loading data from SQLite database...");
-
-        // Test database connection first
-        const isConnected = await apiService.testConnection();
-        if (!isConnected) {
-          console.error("❌ Cannot connect to database, using mock data");
-          const mockData = generateMockData();
-          setUsers(mockData.users);
-          setGoals(mockData.goals);
-          setWeeklyUpdates(mockData.weeklyUpdates);
-          setProofs(mockData.proofs);
-          setCurrentUser(mockData.users[0]);
-          return;
-        }
-
-        // Load users from database
-        const dbUsers = await apiService.getUsers();
-        console.log("✅ Loaded users from database:", dbUsers);
-
-        // Load workout data from database
-        const dbWorkouts = await apiService.getAllWorkouts();
-        console.log("✅ Loaded workouts from database:", dbWorkouts);
-
-        // Load goals data from database
-        const dbGoals = await apiService.getAllGoals();
-        console.log("✅ Loaded goals from database:", dbGoals);
-
-        // Load weekly plans from database
-        const dbPlans = await apiService.getWeeklyPlans().catch((err) => {
-          console.warn("Weekly plans unavailable (API not reachable):", err);
-          return [] as WeeklyPlan[];
-        });
-        console.log("✅ Loaded weekly plans from database:", dbPlans);
-
-        setUsers(dbUsers);
-        setWorkoutDays(dbWorkouts);
-        setGoals(dbGoals);
-        setWeeklyPlans(dbPlans);
-        setCurrentUser(dbUsers[0] || null);
-
-        // Initialize other data (these will be implemented later)
-        setWeeklyUpdates([]);
-        setProofs([]);
-
-        // Recalculate consistency metrics after loading data
-        setTimeout(() => {
-          const currentWeek = getCurrentWeek();
-          const goalData = dbGoals.map((g) => ({
-            userId: g.userId,
-            isCompleted: g.isCompleted,
-          }));
-          const updatedUsers = updateAllUsersConsistency(
-            dbUsers,
-            dbWorkouts,
-            goalData,
-            currentWeek,
-            dbPlans,
-          );
-
-          // Update users with recalculated metrics
-          updatedUsers.forEach((updatedUser) => {
-            const originalUser = dbUsers.find((u) => u.id === updatedUser.id);
-            if (
-              originalUser &&
-              (originalUser.cleanWeeks !== updatedUser.cleanWeeks ||
-                originalUser.missedWeeks !== updatedUser.missedWeeks ||
-                originalUser.currentConsistencyLevel !==
-                  updatedUser.currentConsistencyLevel ||
-                originalUser.totalPoints !== updatedUser.totalPoints)
-            ) {
-              apiService.updateUser(updatedUser.id, updatedUser).then(() => {
-                setUsers((prev) =>
-                  prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)),
-                );
-              });
-            }
-          });
-        }, 500);
-      } catch (error) {
-        console.error("❌ Error loading data from database:", error);
-        // Fallback to mock data if database fails
-        const mockData = generateMockData();
-        setUsers(mockData.users);
-        setGoals(mockData.goals);
-        setWeeklyUpdates(mockData.weeklyUpdates);
-        setProofs(mockData.proofs);
-        setCurrentUser(mockData.users[0]);
-      }
-    };
-
-    loadData();
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
   }, []);
 
-  const updateUser = async (updatedUser: User) => {
-    console.log("App.updateUser called with:", updatedUser);
+  const loadData = useCallback(async (): Promise<boolean> => {
+    try {
+      const isConnected = await apiService.testConnection();
+      if (!isConnected) throw new Error("API unreachable");
 
+      const [dbUsers, dbWorkouts, dbGoals, dbPlans] = await Promise.all([
+        apiService.getUsers(),
+        apiService.getAllWorkouts(),
+        apiService.getAllGoals(),
+        apiService.getWeeklyPlans().catch(() => [] as WeeklyPlan[]),
+      ]);
+
+      const currentWeek = getCurrentWeek();
+      const goalData = dbGoals.map((g) => ({
+        userId: g.userId,
+        isCompleted: g.isCompleted,
+      }));
+      const recalculated = updateAllUsersConsistency(
+        dbUsers,
+        dbWorkouts,
+        goalData,
+        currentWeek,
+        dbPlans,
+      );
+
+      const drifted = recalculated.filter((u) => {
+        const original = dbUsers.find((o) => o.id === u.id);
+        return original && !userConsistencyEqual(original, u);
+      });
+
+      setUsers(recalculated);
+      setWorkoutDays(dbWorkouts);
+      setGoals(dbGoals);
+      setWeeklyPlans(dbPlans);
+      setCurrentUser((prev) => {
+        if (prev) {
+          const match = recalculated.find((u) => u.id === prev.id);
+          if (match) return match;
+        }
+        return recalculated[0] || null;
+      });
+      setWeeklyUpdates([]);
+      setProofs([]);
+
+      writeSnapshot({
+        users: recalculated,
+        workoutDays: dbWorkouts,
+        goals: dbGoals,
+        weeklyPlans: dbPlans,
+      });
+      setSnapshotSavedAt(Date.now());
+      setIsOffline(false);
+      setLoadFailed(false);
+      retryAttemptRef.current = 0;
+
+      // Persist recomputed consistency for any users that drifted from DB.
+      drifted.forEach((u) => {
+        apiService.updateUser(u.id, u).catch((error) => {
+          console.error("Error syncing consistency to database:", error);
+        });
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Error loading data from database:", error);
+      return false;
+    }
+  }, []);
+
+  const scheduleRetry = useCallback(() => {
+    clearRetryTimer();
+    const delay =
+      RETRY_BACKOFF_MS[Math.min(retryAttemptRef.current, RETRY_BACKOFF_MS.length - 1)];
+    retryAttemptRef.current += 1;
+    retryTimeoutRef.current = setTimeout(async () => {
+      const ok = await loadData();
+      if (!ok) scheduleRetry();
+    }, delay);
+  }, [loadData, clearRetryTimer]);
+
+  const manualRetry = useCallback(async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    clearRetryTimer();
+    const ok = await loadData();
+    setIsRetrying(false);
+    if (!ok) {
+      retryAttemptRef.current = 0;
+      scheduleRetry();
+    }
+  }, [isRetrying, clearRetryTimer, loadData, scheduleRetry]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const ok = await loadData();
+      if (cancelled) return;
+      if (ok) return;
+
+      // API failed — hydrate from snapshot if available.
+      const snap = readSnapshot();
+      if (snap) {
+        setUsers(snap.users);
+        setWorkoutDays(snap.workoutDays);
+        setGoals(snap.goals);
+        setWeeklyPlans(snap.weeklyPlans);
+        setCurrentUser(snap.users[0] || null);
+        setWeeklyUpdates([]);
+        setProofs([]);
+        setSnapshotSavedAt(snap.savedAt);
+        setIsOffline(true);
+        scheduleRetry();
+      } else {
+        setLoadFailed(true);
+        scheduleRetry();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearRetryTimer();
+    };
+  }, [loadData, scheduleRetry, clearRetryTimer]);
+
+  const blockIfOffline = (): boolean => {
+    if (isOffline) {
+      showToast("Offline — changes can't be saved yet.", "error");
+      return true;
+    }
+    return false;
+  };
+
+  const updateUser = async (updatedUser: User) => {
+    if (blockIfOffline()) return;
     const existingUserIndex = users.findIndex((u) => u.id === updatedUser.id);
-    console.log("Existing user index:", existingUserIndex);
 
     try {
       let savedUser: User;
 
       if (existingUserIndex >= 0) {
-        // Update existing user
-        console.log("Updating existing user in database");
         savedUser = await apiService.updateUser(updatedUser.id, updatedUser);
       } else {
-        // Create new user (don't use the frontend-generated ID)
-        console.log("Creating new user in database");
-        const { id, ...userDataWithoutId } = updatedUser; // Remove the frontend ID
+        const { id, ...userDataWithoutId } = updatedUser;
         savedUser = await apiService.createUser(userDataWithoutId);
       }
 
-      // Update local state with the database-returned user (which has the correct ID)
       setUsers((prevUsers) => {
         if (existingUserIndex >= 0) {
           const newUsers = [...prevUsers];
           newUsers[existingUserIndex] = savedUser;
           return newUsers;
-        } else {
-          return [...prevUsers, savedUser];
         }
+        return [...prevUsers, savedUser];
       });
 
       if (currentUser?.id === updatedUser.id) {
         setCurrentUser(savedUser);
       }
-
-      console.log("✅ User saved successfully:", savedUser);
     } catch (error) {
-      console.error("❌ Error saving user:", error);
+      console.error("Error saving user:", error);
       showToast(
         `Failed to save user: ${error instanceof Error ? error.message : "Unknown error"}`,
         "error",
@@ -239,15 +307,12 @@ function AppContent() {
   };
 
   const addGoal = async (goal: Goal) => {
+    if (blockIfOffline()) return;
     try {
-      console.log("➕ Creating goal in database:", goal);
       const savedGoal = await apiService.createGoal(goal);
-
-      // Update local state
       setGoals((prevGoals) => [...prevGoals, savedGoal]);
-      console.log("✅ Goal saved to database successfully");
     } catch (error) {
-      console.error("❌ Error saving goal to database:", error);
+      console.error("Error saving goal to database:", error);
       showToast(
         `Failed to save goal: ${error instanceof Error ? error.message : "Unknown error"}`,
         "error",
@@ -256,32 +321,23 @@ function AppContent() {
   };
 
   const updateGoal = async (updatedGoal: Goal) => {
+    if (blockIfOffline()) return;
     try {
-      console.log("✏️ Updating goal in database:", updatedGoal);
       const savedGoal = await apiService.updateGoal(
         updatedGoal.id,
         updatedGoal,
       );
 
-      // Update local state
+      let completionChanged = false;
       setGoals((prevGoals) => {
-        const newGoals = prevGoals.map((g) =>
-          g.id === updatedGoal.id ? savedGoal : g,
-        );
-
-        // Trigger consistency recalculation if goal completion status changed
-        if (
-          updatedGoal.isCompleted !==
-          prevGoals.find((g) => g.id === updatedGoal.id)?.isCompleted
-        ) {
-          setTimeout(() => recalculateUserConsistency(), 100);
-        }
-
-        return newGoals;
+        const prior = prevGoals.find((g) => g.id === updatedGoal.id);
+        completionChanged = prior?.isCompleted !== updatedGoal.isCompleted;
+        return prevGoals.map((g) => (g.id === updatedGoal.id ? savedGoal : g));
       });
-      console.log("✅ Goal updated in database successfully");
+
+      if (completionChanged) recalculateUserConsistency();
     } catch (error) {
-      console.error("❌ Error updating goal in database:", error);
+      console.error("Error updating goal in database:", error);
       showToast(
         `Failed to update goal: ${error instanceof Error ? error.message : "Unknown error"}`,
         "error",
@@ -290,15 +346,12 @@ function AppContent() {
   };
 
   const deleteGoal = async (goalId: string) => {
+    if (blockIfOffline()) return;
     try {
-      console.log("🗑️ Deleting goal from database:", goalId);
       await apiService.deleteGoal(goalId);
-
-      // Update local state
       setGoals((prevGoals) => prevGoals.filter((g) => g.id !== goalId));
-      console.log("✅ Goal deleted from database successfully");
     } catch (error) {
-      console.error("❌ Error deleting goal from database:", error);
+      console.error("Error deleting goal from database:", error);
       showToast(
         `Failed to delete goal: ${error instanceof Error ? error.message : "Unknown error"}`,
         "error",
@@ -307,13 +360,10 @@ function AppContent() {
   };
 
   const updateWorkoutDay = async (workoutDay: WorkoutDay) => {
+    if (blockIfOffline()) return;
     try {
-      console.log("💪 Saving workout to database:", workoutDay);
-
-      // Save to database
       const savedWorkout = await apiService.saveWorkout(workoutDay);
 
-      // Update local state
       setWorkoutDays((prev) => {
         const existing = prev.find(
           (w) =>
@@ -322,24 +372,15 @@ function AppContent() {
             w.dayOfWeek === workoutDay.dayOfWeek,
         );
 
-        let newWorkoutDays;
         if (existing) {
-          newWorkoutDays = prev.map((w) =>
-            w.id === existing.id ? savedWorkout : w,
-          );
-        } else {
-          newWorkoutDays = [...prev, savedWorkout];
+          return prev.map((w) => (w.id === existing.id ? savedWorkout : w));
         }
-
-        // Trigger consistency recalculation after state update
-        setTimeout(() => recalculateUserConsistency(), 100);
-
-        return newWorkoutDays;
+        return [...prev, savedWorkout];
       });
 
-      console.log("✅ Workout saved to database successfully");
+      recalculateUserConsistency();
     } catch (error) {
-      console.error("❌ Error saving workout to database:", error);
+      console.error("Error saving workout to database:", error);
       showToast("Failed to save workout data. Please try again.", "error");
     }
   };
@@ -350,18 +391,21 @@ function AppContent() {
     committedDays: number[];
     createdBy?: 'user' | 'admin';
   }) => {
+    if (isOffline) {
+      showToast("Offline — changes can't be saved yet.", "error");
+      throw new Error("Offline");
+    }
     try {
       const savedPlan = await apiService.saveWeeklyPlan(plan);
       setWeeklyPlans((prev) => {
         const existing = prev.find(
           (p) => p.userId === savedPlan.userId && p.week === savedPlan.week,
         );
-        const next = existing
+        return existing
           ? prev.map((p) => (p.id === existing.id ? savedPlan : p))
           : [...prev, savedPlan];
-        setTimeout(() => recalculateUserConsistency(), 100);
-        return next;
       });
+      recalculateUserConsistency();
       showToast(
         `Plan saved for Week ${savedPlan.week} (${savedPlan.committedDays.length} days)`,
         "success",
@@ -369,20 +413,17 @@ function AppContent() {
       return savedPlan;
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("❌ Error saving weekly plan:", error);
+      console.error("Error saving weekly plan:", error);
       showToast(`Failed to save plan: ${msg}`, "error");
       throw error;
     }
   };
 
   const deleteUser = async (userId: string) => {
+    if (blockIfOffline()) return;
     try {
-      console.log("🗑️ Deleting user from database:", userId);
-
-      // Delete from database (this will cascade delete related data)
       await apiService.deleteUser(userId);
 
-      // Update local state
       setUsers((prevUsers: User[]) =>
         prevUsers.filter((u: User) => u.id !== userId),
       );
@@ -398,13 +439,34 @@ function AppContent() {
       setWorkoutDays((prevWorkouts: WorkoutDay[]) =>
         prevWorkouts.filter((w: WorkoutDay) => w.userId !== userId),
       );
-
-      console.log("✅ User deleted from database successfully");
     } catch (error) {
-      console.error("❌ Error deleting user from database:", error);
+      console.error("Error deleting user from database:", error);
       showToast("Failed to delete user. Please try again.", "error");
     }
   };
+
+  if (loadFailed && !currentUser) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-sm">
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">
+            Can't reach FitBois
+          </h1>
+          <p className="text-gray-600 mb-6">
+            We couldn't load your data and no offline copy is available on this
+            device. Check your connection and try again.
+          </p>
+          <button
+            onClick={manualRetry}
+            disabled={isRetrying}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium disabled:opacity-50"
+          >
+            {isRetrying ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (
@@ -419,6 +481,13 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {isOffline && (
+        <OfflineBanner
+          savedAt={snapshotSavedAt}
+          onRetry={manualRetry}
+          isRetrying={isRetrying}
+        />
+      )}
       <Header activeView={activeView} onViewChange={setActiveView} />
 
       <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
