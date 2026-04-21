@@ -53,8 +53,9 @@ const Goals: React.FC<GoalsProps> = ({
     });
   };
 
-  // Group goals by user (sorted alphabetically)
+  // Group goals by user (active only, sorted alphabetically)
   const goalsByUser = users
+    .filter((u) => u.isActive)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((user) => {
       const userGoals = goals.filter((g) => g.userId === user.id);
@@ -500,6 +501,7 @@ const Goals: React.FC<GoalsProps> = ({
                 >
                   <option value="">Choose a participant...</option>
                   {users
+                    .filter((u) => u.isActive)
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((user) => (
                       <option key={user.id} value={user.id}>
