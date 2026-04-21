@@ -1,4 +1,4 @@
-import { User, Goal, WorkoutDay } from '../types';
+import { User, Goal, WorkoutDay, WeeklyPlan } from '../types';
 
 // In production, use relative URL since frontend and backend are on same server
 // In development, use localhost:5000
@@ -277,6 +277,38 @@ class ApiService {
   }> {
     console.log(`📊 Fetching goal stats for user ${userId}...`);
     return this.fetchApi(`/goals/stats/${userId}`);
+  }
+
+  // ==================== WEEKLY PLANS METHODS ====================
+
+  async getWeeklyPlans(): Promise<WeeklyPlan[]> {
+    console.log('🔍 Fetching all weekly plans from database...');
+    return this.fetchApi<WeeklyPlan[]>('/weekly-plans');
+  }
+
+  async getWeeklyPlan(userId: string, week: number): Promise<WeeklyPlan> {
+    console.log(`🔍 Fetching weekly plan for user ${userId}, week ${week}...`);
+    return this.fetchApi<WeeklyPlan>(`/weekly-plans/${userId}/${week}`);
+  }
+
+  async saveWeeklyPlan(plan: {
+    userId: string;
+    week: number;
+    committedDays: number[];
+    createdBy?: 'user' | 'admin';
+  }): Promise<WeeklyPlan> {
+    console.log('📅 Saving weekly plan...', plan);
+    return this.fetchApi<WeeklyPlan>('/weekly-plans', {
+      method: 'POST',
+      body: JSON.stringify(plan),
+    });
+  }
+
+  async deleteWeeklyPlan(userId: string, week: number): Promise<void> {
+    console.log(`🗑️ Deleting weekly plan for user ${userId}, week ${week}...`);
+    await this.fetchApi<void>(`/weekly-plans/${userId}/${week}`, {
+      method: 'DELETE',
+    });
   }
 
   // ==================== CONNECTION TEST ====================

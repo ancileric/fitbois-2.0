@@ -143,6 +143,28 @@ const createTables = () => {
     }
   });
 
+  // Weekly plans table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS weekly_plans (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      committed_days TEXT NOT NULL,
+      committed_at TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT 'admin',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('Error creating weekly_plans table:', err.message);
+    } else {
+      console.log('✅ Weekly plans table ready');
+    }
+  });
+
   // Admin settings table
   db.run(`
     CREATE TABLE IF NOT EXISTS admin_settings (
@@ -185,6 +207,8 @@ const createTables = () => {
     { name: 'idx_proofs_user', table: 'proofs', column: 'user_id' },
     { name: 'idx_proofs_goal', table: 'proofs', column: 'goal_id' },
     { name: 'idx_weekly_updates_user', table: 'weekly_updates', column: 'user_id' },
+    { name: 'idx_weekly_plans_user', table: 'weekly_plans', column: 'user_id' },
+    { name: 'idx_weekly_plans_week', table: 'weekly_plans', column: 'week' },
   ];
 
   indexes.forEach(idx => {

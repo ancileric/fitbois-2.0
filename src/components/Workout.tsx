@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { User, WorkoutDay, AdminSettings, getRequiredWorkouts } from "../types";
+import { User, WorkoutDay, WeeklyPlan, AdminSettings, getRequiredWorkouts } from "../types";
 import {
   CheckCircle,
   XCircle,
@@ -7,23 +7,43 @@ import {
   Calendar,
   ChevronDown,
   Activity,
+  Target,
+  Lock,
 } from "lucide-react";
 import { getCurrentWeek, getDaysUntilStart, getWeekDates, formatDayLabel } from "../utils/dateUtils";
 import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
+import WeeklyPlanModal, { PlanLockReason } from "./WeeklyPlanModal";
 
 interface WorkoutProps {
   users: User[];
   workoutDays: WorkoutDay[];
+  weeklyPlans: WeeklyPlan[];
   adminSettings: AdminSettings;
   onUpdateWorkoutDay: (workoutDay: WorkoutDay) => void;
+  onUpdateWeeklyPlan: (plan: {
+    userId: string;
+    week: number;
+    committedDays: number[];
+    createdBy?: "user" | "admin";
+  }) => Promise<WeeklyPlan | undefined> | Promise<WeeklyPlan>;
 }
+
+// Returns 1 (Monday) through 7 (Sunday) in IST — mirrors backend.
+const currentISTDayOfWeek = (): number => {
+  const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const jsDow = istNow.getUTCDay();
+  return jsDow === 0 ? 7 : jsDow;
+};
 
 const Workout: React.FC<WorkoutProps> = ({
   users,
   workoutDays,
+  weeklyPlans,
   adminSettings,
   onUpdateWorkoutDay,
+  onUpdateWeeklyPlan,
 }) => {
+  const [planModalUserId, setPlanModalUserId] = useState<string | null>(null);
   // Calculate current week first so we can use it for initial state
   const currentWeek = getCurrentWeek(adminSettings.challengeStartDate);
   const [selectedWeek, setSelectedWeek] = useState(() =>
@@ -226,6 +246,58 @@ const Workout: React.FC<WorkoutProps> = ({
     });
   }, [users, workoutDays, weeks, currentWeek, userWeekStatusesMap]);
 
+  // Look up a user's plan for the selected week.
+  const getPlanFor = (userId: string): WeeklyPlan | null => {
+    return (
+      weeklyPlans.find(
+        (p) => p.userId === userId && p.week === selectedWeek,
+      ) || null
+    );
+  };
+
+  // Determine if/why a plan is locked for this user + selectedWeek.
+  const getLockReason = (userId: string): PlanLockReason => {
+    if (currentWeek > 0 && selectedWeek < currentWeek) return "past-week";
+    if (selectedWeek > currentWeek) return null; // future week always editable
+    // selectedWeek === currentWeek
+    if (currentISTDayOfWeek() > 1) return "monday-ended";
+    const hasWorkout = workoutDays.some(
+      (w) =>
+        w.userId === userId &&
+        w.week === selectedWeek &&
+        w.isCompleted,
+    );
+    if (hasWorkout) return "workout-logged";
+    return null;
+  };
+
+  // For a committed day in a past week, has the user satisfied it?
+  const didCommitHit = (
+    userId: string,
+    week: number,
+    day: number,
+    level: number,
+  ): boolean => {
+    return workoutDays.some(
+      (w) =>
+        w.userId === userId &&
+        w.week === week &&
+        w.dayOfWeek === day &&
+        w.isCompleted &&
+        (level >= 5 || w.workoutType !== "steps"),
+    );
+  };
+
+  const planModalUser = planModalUserId
+    ? users.find((u) => u.id === planModalUserId) || null
+    : null;
+  const planModalExistingPlan = planModalUser
+    ? getPlanFor(planModalUser.id)
+    : null;
+  const planModalLockReason: PlanLockReason = planModalUser
+    ? getLockReason(planModalUser.id)
+    : null;
+
   return (
     <div className="space-y-4">
       {/* Header with inline stats */}
@@ -339,6 +411,71 @@ const Workout: React.FC<WorkoutProps> = ({
                     </div>
                   </div>
 
+                  {/* Plan strip */}
+                  {(() => {
+                    const plan = getPlanFor(user.id);
+                    const lockReason = getLockReason(user.id);
+                    const editable = lockReason === null;
+                    const level = user.currentConsistencyLevel;
+                    const isPast = selectedWeek < currentWeek;
+
+                    return (
+                      <div className="mb-3 flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Target size={14} className="text-primary-500 shrink-0" />
+                          {plan ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {plan.committedDays.map((d) => {
+                                const hit = didCommitHit(
+                                  user.id,
+                                  selectedWeek,
+                                  d,
+                                  level,
+                                );
+                                const baseCls =
+                                  "text-xs font-medium rounded px-1.5 py-0.5";
+                                const cls = isPast
+                                  ? hit
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                  : hit
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-primary-50 text-primary-700";
+                                return (
+                                  <span
+                                    key={d}
+                                    className={`${baseCls} ${cls}`}
+                                  >
+                                    {daysOfWeek[d - 1]}
+                                    {isPast && !hit ? " ✗" : hit ? " ✓" : ""}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">
+                              {editable
+                                ? "No plan yet this week"
+                                : "No plan — bonus unavailable"}
+                            </span>
+                          )}
+                        </div>
+                        {editable ? (
+                          <button
+                            onClick={() => setPlanModalUserId(user.id)}
+                            className="text-xs font-medium text-primary-600 hover:text-primary-700 shrink-0"
+                          >
+                            {plan ? "Edit plan" : "Commit →"}
+                          </button>
+                        ) : (
+                          !isPast && (
+                            <Lock size={12} className="text-gray-400 shrink-0" />
+                          )
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* Days Row */}
                   <div className="flex justify-between items-center">
                     {daysOfWeek.map((day, dayIndex) => {
@@ -349,6 +486,8 @@ const Workout: React.FC<WorkoutProps> = ({
                       );
                       const isCompleted = workoutDay?.isCompleted || false;
                       const isSteps = isCompleted && workoutDay?.workoutType === "steps";
+                      const plan = getPlanFor(user.id);
+                      const isCommitted = plan?.committedDays.includes(dayIndex + 1) || false;
 
                       return (
                         <div key={day} className="flex flex-col items-center">
@@ -363,6 +502,8 @@ const Workout: React.FC<WorkoutProps> = ({
                               cycleWorkout(user, selectedWeek, dayIndex + 1)
                             }
                             className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                              isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
+                            } ${
                               isSteps
                                 ? "bg-blue-500 text-white"
                                 : isCompleted
@@ -433,7 +574,7 @@ const Workout: React.FC<WorkoutProps> = ({
                           <div className="w-8 h-8 bg-primary-500 text-white rounded-full flex items-center justify-center text-sm">
                             {user.avatar || user.name.charAt(0)}
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="flex items-center space-x-2">
                               <span className="font-medium text-gray-900">
                                 {user.name}
@@ -452,6 +593,61 @@ const Workout: React.FC<WorkoutProps> = ({
                                 </span>
                               )}
                             </div>
+                            {(() => {
+                              const plan = getPlanFor(user.id);
+                              const lockReason = getLockReason(user.id);
+                              const editable = lockReason === null;
+                              const level = user.currentConsistencyLevel;
+                              const isPast = selectedWeek < currentWeek;
+
+                              return (
+                                <div className="mt-1 flex items-center gap-1 flex-wrap">
+                                  <Target size={11} className="text-primary-500 shrink-0" />
+                                  {plan ? (
+                                    plan.committedDays.map((d) => {
+                                      const hit = didCommitHit(
+                                        user.id,
+                                        selectedWeek,
+                                        d,
+                                        level,
+                                      );
+                                      const cls = isPast
+                                        ? hit
+                                          ? "bg-green-100 text-green-800"
+                                          : "bg-red-100 text-red-800"
+                                        : hit
+                                          ? "bg-green-100 text-green-800"
+                                          : "bg-primary-50 text-primary-700";
+                                      return (
+                                        <span
+                                          key={d}
+                                          className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${cls}`}
+                                        >
+                                          {daysOfWeek[d - 1]}
+                                          {isPast && !hit ? " ✗" : hit ? " ✓" : ""}
+                                        </span>
+                                      );
+                                    })
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400">
+                                      {editable
+                                        ? "No plan yet"
+                                        : "No plan — bonus unavailable"}
+                                    </span>
+                                  )}
+                                  {editable ? (
+                                    <button
+                                      onClick={() => setPlanModalUserId(user.id)}
+                                      className="text-[11px] font-medium text-primary-600 hover:text-primary-700 ml-1"
+                                    >
+                                      {plan ? "edit" : "commit →"}
+                                    </button>
+                                  ) : !isPast ? (
+                                    <Lock size={10} className="text-gray-400 ml-1" />
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </td>
@@ -470,6 +666,8 @@ const Workout: React.FC<WorkoutProps> = ({
                         );
                         const isCompleted = workoutDay?.isCompleted || false;
                         const isSteps = isCompleted && workoutDay?.workoutType === "steps";
+                        const plan = getPlanFor(user.id);
+                        const isCommitted = plan?.committedDays.includes(dayIndex + 1) || false;
 
                         return (
                           <td key={day} className="py-4 px-3 text-center">
@@ -479,6 +677,8 @@ const Workout: React.FC<WorkoutProps> = ({
                                   cycleWorkout(user, selectedWeek, dayIndex + 1)
                                 }
                                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                                  isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
+                                } ${
                                   isSteps
                                     ? "bg-blue-500 text-white hover:bg-blue-600"
                                     : isCompleted
@@ -522,6 +722,26 @@ const Workout: React.FC<WorkoutProps> = ({
           </table>
         </div>
       </div>
+
+      {planModalUser && (
+        <WeeklyPlanModal
+          isOpen={true}
+          onClose={() => setPlanModalUserId(null)}
+          user={planModalUser}
+          week={selectedWeek}
+          weekDates={weekDates}
+          existingPlan={planModalExistingPlan}
+          lockReason={planModalLockReason}
+          onSave={async (days) => {
+            await onUpdateWeeklyPlan({
+              userId: planModalUser.id,
+              week: selectedWeek,
+              committedDays: days,
+              createdBy: "admin",
+            });
+          }}
+        />
+      )}
     </div>
   );
 };

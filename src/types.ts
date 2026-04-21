@@ -69,6 +69,15 @@ export interface WorkoutDay {
   timestamp: string;
 }
 
+export interface WeeklyPlan {
+  id: string;
+  userId: string;
+  week: number;
+  committedDays: number[]; // 1 = Monday … 7 = Sunday
+  committedAt: string;
+  createdBy: 'user' | 'admin';
+}
+
 export interface AdminSettings {
   challengeStartDate: string;
   challengeEndDate: string;

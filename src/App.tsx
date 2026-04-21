@@ -3,6 +3,7 @@ import {
   User,
   Goal,
   WeeklyUpdate,
+  WeeklyPlan,
   Proof,
   WorkoutDay,
   AdminSettings,
@@ -29,6 +30,7 @@ function AppContent() {
   const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([]);
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
+  const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
     challengeEndDate: "2026-07-31",
@@ -58,6 +60,7 @@ function AppContent() {
         workoutDays,
         goalData,
         currentWeek,
+        weeklyPlans,
       );
 
       // Log changes and update database
@@ -124,9 +127,17 @@ function AppContent() {
         const dbGoals = await apiService.getAllGoals();
         console.log("✅ Loaded goals from database:", dbGoals);
 
+        // Load weekly plans from database
+        const dbPlans = await apiService.getWeeklyPlans().catch((err) => {
+          console.warn("Weekly plans unavailable (API not reachable):", err);
+          return [] as WeeklyPlan[];
+        });
+        console.log("✅ Loaded weekly plans from database:", dbPlans);
+
         setUsers(dbUsers);
         setWorkoutDays(dbWorkouts);
         setGoals(dbGoals);
+        setWeeklyPlans(dbPlans);
         setCurrentUser(dbUsers[0] || null);
 
         // Initialize other data (these will be implemented later)
@@ -145,6 +156,7 @@ function AppContent() {
             dbWorkouts,
             goalData,
             currentWeek,
+            dbPlans,
           );
 
           // Update users with recalculated metrics
@@ -339,6 +351,37 @@ function AppContent() {
     }
   };
 
+  const updateWeeklyPlan = async (plan: {
+    userId: string;
+    week: number;
+    committedDays: number[];
+    createdBy?: 'user' | 'admin';
+  }) => {
+    try {
+      const savedPlan = await apiService.saveWeeklyPlan(plan);
+      setWeeklyPlans((prev) => {
+        const existing = prev.find(
+          (p) => p.userId === savedPlan.userId && p.week === savedPlan.week,
+        );
+        const next = existing
+          ? prev.map((p) => (p.id === existing.id ? savedPlan : p))
+          : [...prev, savedPlan];
+        setTimeout(() => recalculateUserConsistency(), 100);
+        return next;
+      });
+      showToast(
+        `Plan saved for Week ${savedPlan.week} (${savedPlan.committedDays.length} days)`,
+        "success",
+      );
+      return savedPlan;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      console.error("❌ Error saving weekly plan:", error);
+      showToast(`Failed to save plan: ${msg}`, "error");
+      throw error;
+    }
+  };
+
   const updateAdminSettings = (settings: AdminSettings) => {
     setAdminSettings(settings);
     // TODO: Implement API call to save admin settings to database
@@ -396,8 +439,10 @@ function AppContent() {
             <Workout
               users={users}
               workoutDays={workoutDays}
+              weeklyPlans={weeklyPlans}
               adminSettings={adminSettings}
               onUpdateWorkoutDay={updateWorkoutDay}
+              onUpdateWeeklyPlan={updateWeeklyPlan}
             />
           )}
 

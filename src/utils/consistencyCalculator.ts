@@ -1,4 +1,4 @@
-import { User, WorkoutDay, getRequiredWorkouts } from '../types';
+import { User, WorkoutDay, WeeklyPlan, getRequiredWorkouts } from '../types';
 
 export interface WeekStatus {
   week: number;
@@ -15,6 +15,7 @@ export interface ConsistencyUpdate {
   newConsistencyLevel: 3 | 4 | 5;
   levelChanged: boolean;
   totalPoints: number;
+  bonusWeeks: number;
 }
 
 /**
@@ -291,13 +292,60 @@ export const shouldBeEliminated = (
 };
 
 /**
+ * Count "planning bonus" weeks — completed weeks in which the user had a plan and
+ * satisfied every committed day. A committed day is satisfied by a completed
+ * workout_days row for that day_of_week. For Levels 3 & 4, a "steps" workout does
+ * NOT satisfy a commitment (mirrors the level-aware steps rule for clean weeks).
+ */
+export const calculateBonusWeeks = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  weeklyPlans: WeeklyPlan[],
+  currentWeek: number
+): number => {
+  const completedWeeks = currentWeek - 1;
+  if (completedWeeks <= 0) return 0;
+
+  const userPlans = weeklyPlans.filter(p => p.userId === user.id);
+  if (userPlans.length === 0) return 0;
+
+  const levelHistory = calculateLevelHistory(user, workoutDays, currentWeek);
+  const levelByWeek = new Map<number, number>();
+  levelHistory.forEach(pt => levelByWeek.set(pt.week, pt.level));
+
+  let bonus = 0;
+  for (const plan of userPlans) {
+    if (plan.week < 1 || plan.week > completedWeeks) continue;
+    if (!Array.isArray(plan.committedDays) || plan.committedDays.length === 0) continue;
+
+    const levelAtWeek = levelByWeek.get(plan.week) ?? 5;
+    const stepsCounts = levelAtWeek >= 5;
+
+    const satisfiedAll = plan.committedDays.every(day =>
+      workoutDays.some(w =>
+        w.userId === user.id &&
+        w.week === plan.week &&
+        w.dayOfWeek === day &&
+        w.isCompleted &&
+        (stepsCounts || w.workoutType !== 'steps')
+      )
+    );
+
+    if (satisfiedAll) bonus++;
+  }
+
+  return bonus;
+};
+
+/**
  * Calculate complete consistency update for a user
  */
 export const calculateConsistencyUpdate = (
   user: User,
   workoutDays: WorkoutDay[],
   currentWeek: number,
-  completedGoals: number
+  completedGoals: number,
+  weeklyPlans: WeeklyPlan[] = []
 ): ConsistencyUpdate => {
   const { cleanWeeks, missedWeeks } = calculateConsistencyMetrics(
     user,
@@ -308,9 +356,10 @@ export const calculateConsistencyUpdate = (
   const newConsistencyLevel = simulateProgression(user, workoutDays, currentWeek);
   const levelChanged = newConsistencyLevel !== user.currentConsistencyLevel;
   const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
+  const bonusWeeks = calculateBonusWeeks(user, workoutDays, weeklyPlans, currentWeek);
 
-  // Points = completed goals (1 point each) + clean weeks (1 point each)
-  const totalPoints = completedGoals + cleanWeeks;
+  // Points = completed goals (1 each) + clean weeks (1 each) + planning bonus (1 each)
+  const totalPoints = completedGoals + cleanWeeks + bonusWeeks;
 
   return {
     userId: user.id,
@@ -319,7 +368,8 @@ export const calculateConsistencyUpdate = (
     stintMissedWeeks,
     newConsistencyLevel,
     levelChanged,
-    totalPoints
+    totalPoints,
+    bonusWeeks
   };
 };
 
@@ -379,13 +429,14 @@ export const updateAllUsersConsistency = (
   users: User[],
   workoutDays: WorkoutDay[],
   goals: { userId: string; isCompleted: boolean }[],
-  currentWeek: number
+  currentWeek: number,
+  weeklyPlans: WeeklyPlan[] = []
 ): User[] => {
   return users.map(user => {
     if (!user.isActive) return user;
 
     const userCompletedGoals = goals.filter(g => g.userId === user.id && g.isCompleted).length;
-    const update = calculateConsistencyUpdate(user, workoutDays, currentWeek, userCompletedGoals);
+    const update = calculateConsistencyUpdate(user, workoutDays, currentWeek, userCompletedGoals, weeklyPlans);
 
     // Check for elimination using per-stint missed weeks
     const eliminated = shouldBeEliminated(user, update.stintMissedWeeks);

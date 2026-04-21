@@ -67,6 +67,29 @@ db.run(
   }
 );
 
+// Create weekly_plans table if it doesn't exist (self-heal for existing DBs)
+db.run(
+  `CREATE TABLE IF NOT EXISTS weekly_plans (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    week INTEGER NOT NULL,
+    committed_days TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'admin',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE(user_id, week)
+  )`,
+  (err) => {
+    if (err) {
+      console.error("Error creating weekly_plans table:", err.message);
+    } else {
+      console.log("✅ Migration: weekly_plans table ready");
+    }
+  }
+);
+
 // Create indexes if they don't exist (for existing databases)
 const createIndexes = () => {
   const indexes = [
@@ -75,6 +98,8 @@ const createIndexes = () => {
     "CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week)",
     "CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id)",
     "CREATE INDEX IF NOT EXISTS idx_goals_category ON goals (category)",
+    "CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_weekly_plans_week ON weekly_plans (week)",
   ];
 
   indexes.forEach((sql) => {
@@ -150,6 +175,35 @@ const sanitizeString = (value) => {
   // Remove potentially dangerous characters while preserving useful ones
   return value.trim().replace(/[<>]/g, "");
 };
+
+// ==================== IST DATE HELPERS ====================
+// Challenge start (Monday, IST). MUST match frontend src/utils/dateUtils.ts.
+const CHALLENGE_START_UTC_MS = Date.UTC(2026, 0, 19);
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+// Returns the current challenge week (1-based) in IST, or 0 before start.
+const getCurrentWeekIST = () => {
+  const istNow = new Date(Date.now() + IST_OFFSET_MS);
+  const istMidnightUTC = Date.UTC(
+    istNow.getUTCFullYear(),
+    istNow.getUTCMonth(),
+    istNow.getUTCDate()
+  );
+  const daysDiff = Math.floor(
+    (istMidnightUTC - CHALLENGE_START_UTC_MS) / 86400000
+  );
+  if (daysDiff < 0) return 0;
+  return Math.floor(daysDiff / 7) + 1;
+};
+
+// Returns 1 (Monday) through 7 (Sunday) in IST.
+const currentISTDayOfWeek = () => {
+  const istNow = new Date(Date.now() + IST_OFFSET_MS);
+  const jsDow = istNow.getUTCDay(); // 0=Sun..6=Sat
+  return jsDow === 0 ? 7 : jsDow;
+};
+
+const requiredWorkoutsForLevel = (level) => (Number(level) >= 5 ? 5 : 4);
 
 // ==================== USER ROUTES ====================
 
@@ -1100,6 +1154,251 @@ app.get("/api/goals/stats/:userId", (req, res) => {
 
     res.json(stats);
   });
+});
+
+// ==================== WEEKLY PLANS ROUTES ====================
+
+const serializeWeeklyPlan = (row) => {
+  let committedDays = [];
+  try {
+    const parsed = JSON.parse(row.committed_days);
+    if (Array.isArray(parsed)) committedDays = parsed.map((d) => Number(d));
+  } catch (e) {
+    committedDays = [];
+  }
+  return {
+    id: row.id,
+    userId: row.user_id,
+    week: row.week,
+    committedDays,
+    committedAt: row.committed_at,
+    createdBy: row.created_by,
+  };
+};
+
+// GET all weekly plans
+app.get("/api/weekly-plans", (req, res) => {
+  const query = `SELECT * FROM weekly_plans ORDER BY week DESC, user_id`;
+  db.all(query, [], (err, rows) => {
+    if (err) {
+      console.error("Error fetching weekly plans:", err.message);
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    const plans = rows.map(serializeWeeklyPlan);
+    console.log(`📊 Fetched ${plans.length} weekly plans`);
+    res.json(plans);
+  });
+});
+
+// GET a weekly plan for (userId, week)
+app.get("/api/weekly-plans/:userId/:week", (req, res) => {
+  const userId = req.params.userId;
+  const week = Number(req.params.week);
+  if (!Number.isInteger(week) || week < 1) {
+    res.status(400).json({ error: "week must be a positive integer" });
+    return;
+  }
+  db.get(
+    `SELECT * FROM weekly_plans WHERE user_id = ? AND week = ?`,
+    [userId, week],
+    (err, row) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (!row) {
+        res.status(404).json({ error: "Weekly plan not found" });
+        return;
+      }
+      res.json(serializeWeeklyPlan(row));
+    }
+  );
+});
+
+// POST upsert a weekly plan
+app.post("/api/weekly-plans", (req, res) => {
+  const { userId, week, committedDays, createdBy } = req.body;
+
+  if (!userId || typeof userId !== "string") {
+    res.status(400).json({ error: "userId is required" });
+    return;
+  }
+  const weekNum = Number(week);
+  if (!Number.isInteger(weekNum) || weekNum < 1) {
+    res.status(400).json({ error: "week must be a positive integer" });
+    return;
+  }
+  if (!Array.isArray(committedDays) || committedDays.length === 0) {
+    res.status(400).json({ error: "committedDays must be a non-empty array" });
+    return;
+  }
+  const daysAsNumbers = committedDays.map((d) => Number(d));
+  for (const d of daysAsNumbers) {
+    if (!Number.isInteger(d) || d < 1 || d > 7) {
+      res
+        .status(400)
+        .json({ error: "committedDays must be integers in 1-7 (Mon-Sun)" });
+      return;
+    }
+  }
+  const uniqueDays = [...new Set(daysAsNumbers)];
+  if (uniqueDays.length !== daysAsNumbers.length) {
+    res.status(400).json({ error: "committedDays must be unique" });
+    return;
+  }
+  uniqueDays.sort((a, b) => a - b);
+  const validCreatedBy = ["user", "admin"].includes(createdBy)
+    ? createdBy
+    : "admin";
+
+  db.get(
+    `SELECT id, current_consistency_level, is_active FROM users WHERE id = ?`,
+    [userId],
+    (err, user) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (!user) {
+        res.status(404).json({ error: `User ${userId} not found` });
+        return;
+      }
+      if (!user.is_active) {
+        res
+          .status(403)
+          .json({ error: "User is eliminated — cannot submit a plan" });
+        return;
+      }
+
+      const required = requiredWorkoutsForLevel(user.current_consistency_level);
+      if (uniqueDays.length < required) {
+        res.status(400).json({
+          error: `Level ${user.current_consistency_level} users must commit to at least ${required} days`,
+        });
+        return;
+      }
+
+      const currentWeek = getCurrentWeekIST();
+      if (currentWeek > 0 && weekNum < currentWeek) {
+        res
+          .status(400)
+          .json({ error: "Cannot submit a plan for a past week" });
+        return;
+      }
+
+      const upsert = () => {
+        db.get(
+          `SELECT id, committed_at FROM weekly_plans WHERE user_id = ? AND week = ?`,
+          [userId, weekNum],
+          (errExisting, existing) => {
+            if (errExisting) {
+              res.status(500).json({ error: errExisting.message });
+              return;
+            }
+            const id = existing?.id || uuidv4();
+            const committedAt =
+              existing?.committed_at || new Date().toISOString();
+
+            const upsertQuery = `
+              INSERT OR REPLACE INTO weekly_plans (
+                id, user_id, week, committed_days, committed_at, created_by, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `;
+            const params = [
+              id,
+              userId,
+              weekNum,
+              JSON.stringify(uniqueDays),
+              committedAt,
+              validCreatedBy,
+            ];
+            db.run(upsertQuery, params, function (errRun) {
+              if (errRun) {
+                console.error(
+                  "Error upserting weekly plan:",
+                  errRun.message
+                );
+                res.status(500).json({ error: errRun.message });
+                return;
+              }
+              console.log(
+                `✅ Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
+              );
+              res.json({
+                id,
+                userId,
+                week: weekNum,
+                committedDays: uniqueDays,
+                committedAt,
+                createdBy: validCreatedBy,
+              });
+            });
+          }
+        );
+      };
+
+      // Lock check: only applies to the current week. Future weeks are
+      // always editable; past weeks were rejected above.
+      if (weekNum === currentWeek) {
+        if (currentISTDayOfWeek() > 1) {
+          res.status(403).json({
+            error:
+              "Commitment window closed — it is past Monday IST for this week",
+            lockReason: "monday-ended",
+          });
+          return;
+        }
+        db.get(
+          `SELECT 1 FROM workout_days WHERE user_id = ? AND week = ? AND is_completed = 1 LIMIT 1`,
+          [userId, weekNum],
+          (errWorkout, row) => {
+            if (errWorkout) {
+              res.status(500).json({ error: errWorkout.message });
+              return;
+            }
+            if (row) {
+              res.status(403).json({
+                error:
+                  "Commitment window closed — a workout has already been logged for this week",
+                lockReason: "workout-logged",
+              });
+              return;
+            }
+            upsert();
+          }
+        );
+      } else {
+        upsert();
+      }
+    }
+  );
+});
+
+// DELETE a weekly plan (admin cleanup / testing)
+app.delete("/api/weekly-plans/:userId/:week", (req, res) => {
+  const userId = req.params.userId;
+  const week = Number(req.params.week);
+  if (!Number.isInteger(week) || week < 1) {
+    res.status(400).json({ error: "week must be a positive integer" });
+    return;
+  }
+  db.run(
+    `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
+    [userId, week],
+    function (err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: "Weekly plan not found" });
+        return;
+      }
+      console.log(`🗑️ Deleted weekly plan for user ${userId}, week ${week}`);
+      res.json({ message: "Weekly plan deleted" });
+    }
+  );
 });
 
 // ==================== HEALTH CHECK ====================
