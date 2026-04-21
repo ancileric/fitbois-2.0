@@ -36,6 +36,7 @@ coverage/
 .cache/
 
 # Database files and backups
+*.db
 *.db-journal
 *.db-shm
 *.db-wal

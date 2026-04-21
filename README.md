@@ -138,11 +138,7 @@ The SQLite database will be automatically created on first run at:
 backend/database/fitbois.db
 ```
 
-To initialize with sample data, use the backend scripts:
-```bash
-cd backend
-node scripts/initDatabase.js
-```
+On each backend boot, `backend/scripts/safeInitDatabase.js` runs with `CREATE TABLE IF NOT EXISTS` guards — your data is preserved across restarts.
 
 ## Project Structure
 
@@ -152,9 +148,9 @@ FitBois 2.0/
 │   ├── database/              # SQLite database
 │   │   └── fitbois.db        # Main database file
 │   ├── scripts/              # Database utilities
-│   │   ├── initDatabase.js   # Initialize database
-│   │   ├── backupDatabase.js # Backup utility
-│   │   └── restoreDatabase.js # Restore utility
+│   │   ├── safeInitDatabase.js # Idempotent DB init (runs on boot)
+│   │   ├── backupDatabase.js   # Backup utility
+│   │   └── restoreDatabase.js  # Restore utility
 │   ├── server.js             # Express server & API
 │   └── package.json          # Backend dependencies
 ├── src/                       # Frontend React app
@@ -244,6 +240,12 @@ FitBois 2.0/
 - `GET /api/workouts/:userId/:week` - Get workouts for user and week
 - `POST /api/workouts` - Create/update workout
 - `DELETE /api/workouts/:id` - Delete workout
+
+### Weekly Plans
+- `GET /api/weekly-plans` - Get all weekly plans
+- `GET /api/weekly-plans/:userId/:week` - Get a single plan
+- `POST /api/weekly-plans` - Upsert a plan (admin+override:true bypasses lock)
+- `DELETE /api/weekly-plans/:userId/:week` - Delete a plan
 
 ### Health
 - `GET /api/health` - Check API status

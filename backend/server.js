@@ -1415,38 +1415,6 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ==================== TEMPORARY BACKUP ENDPOINT ====================
-// ⚠️ SECURITY WARNING: This endpoint allows downloading the entire database
-// TODO: REMOVE THIS AFTER BACKING UP YOUR DATA!
-
-app.get("/api/admin/download-database", (req, res) => {
-  const dbPath = path.join(__dirname, "database", "fitbois.db");
-
-  // Check if database exists
-  if (!fs.existsSync(dbPath)) {
-    return res.status(404).json({
-      error: "Database file not found",
-      path: dbPath,
-    });
-  }
-
-  // Get file stats
-  const stats = fs.statSync(dbPath);
-  const fileSizeKB = (stats.size / 1024).toFixed(2);
-
-  console.log(`📥 Database download requested - Size: ${fileSizeKB} KB`);
-
-  // Send the file
-  res.download(dbPath, "fitbois-railway-backup.db", (err) => {
-    if (err) {
-      console.error("Error downloading database:", err);
-      res.status(500).json({ error: "Error downloading database" });
-    } else {
-      console.log("✅ Database downloaded successfully");
-    }
-  });
-});
-
 // ==================== CATCH-ALL FOR REACT SPA ====================
 
 // In production, serve React app for any non-API routes
