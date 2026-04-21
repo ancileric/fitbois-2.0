@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from "react";
-import { User, Goal, WeeklyUpdate, Proof, WorkoutDay, getRequiredWorkouts } from "../types";
+import { User, Goal, WeeklyUpdate, Proof, WorkoutDay, WeeklyPlan, getRequiredWorkouts } from "../types";
 import {
   getCurrentWeek,
   getChallengeProgress,
   getDaysUntilStart,
+  getWeekDates,
+  formatISTDate,
 } from "../utils/dateUtils";
 import { calculateAllWeekStatuses, calculateStintMissedWeeks, calculateLevelHistory, LevelPoint } from "../utils/consistencyCalculator";
 import LevelTimeline from "./LevelTimeline";
@@ -16,6 +18,7 @@ interface DashboardProps {
   weeklyUpdates: WeeklyUpdate[];
   proofs: Proof[];
   workoutDays: WorkoutDay[];
+  weeklyPlans?: WeeklyPlan[];
 }
 
 interface HeatmapDay {
@@ -44,6 +47,58 @@ interface HeatmapMonth {
   width: number;
 }
 
+const SPARKLINE_WEEKS = 14;
+
+type SparkCell = "clean" | "miss" | "partial";
+
+const SPARK_COLORS: Record<SparkCell, string> = {
+  clean: "#16a34a",
+  partial: "#eab308",
+  miss: "#dc2626",
+};
+
+const Sparkline: React.FC<{ cells: SparkCell[]; className?: string }> = ({
+  cells,
+  className = "",
+}) => {
+  const width = 140;
+  const height = 16;
+  const gap = 2;
+  const cellCount = SPARKLINE_WEEKS;
+  const cellWidth = (width - gap * (cellCount - 1)) / cellCount;
+
+  // Right-align so most recent week is rightmost
+  const paddedStart = cellCount - cells.length;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      className={className}
+      role="img"
+      aria-label={`Consistency for last ${cells.length} week${cells.length === 1 ? "" : "s"}`}
+    >
+      {Array.from({ length: cellCount }).map((_, i) => {
+        const cellIdx = i - paddedStart;
+        const cell = cellIdx >= 0 ? cells[cellIdx] : null;
+        const x = i * (cellWidth + gap);
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={0}
+            width={cellWidth}
+            height={height}
+            rx={2}
+            fill={cell ? SPARK_COLORS[cell] : "#e5e7eb"}
+          />
+        );
+      })}
+    </svg>
+  );
+};
+
 const Dashboard: React.FC<DashboardProps> = ({
   currentUser,
   users,
@@ -51,6 +106,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   weeklyUpdates,
   proofs,
   workoutDays,
+  weeklyPlans = [],
 }) => {
   const [selectedHeatmapUser, setSelectedHeatmapUser] = useState<string>(
     users[0]?.id || "",
@@ -66,6 +122,13 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Calculate leaderboard data
   const leaderboardData = useMemo(() => {
+    // Current week date range for "goals this week" and "completed this week"
+    const currentWeekDates =
+      currentWeek > 0 ? getWeekDates(undefined, currentWeek) : [];
+    const currentWeekDateStrs = new Set(
+      currentWeekDates.map((d) => formatISTDate(d)),
+    );
+
     return users
       .filter((u) => u.isActive)
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -100,6 +163,86 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
 
+        // --- This-week metrics ---
+        const requiredThisWeek = getRequiredWorkouts(user.currentConsistencyLevel);
+        const stepsCountThisWeek = user.currentConsistencyLevel >= 5;
+        const completedThisWeek = workoutDays.filter(
+          (w) =>
+            w.userId === user.id &&
+            w.week === currentWeek &&
+            w.isCompleted &&
+            (stepsCountThisWeek || w.workoutType !== "steps"),
+        ).length;
+        const needsMoreThisWeek = Math.max(0, requiredThisWeek - completedThisWeek);
+        const cleanThisWeek = completedThisWeek >= requiredThisWeek ? 1 : 0;
+
+        // Plan-bonus for current week (all committed days already satisfied)
+        const thisWeekPlan = weeklyPlans.find(
+          (p) => p.userId === user.id && p.week === currentWeek,
+        );
+        const bonusThisWeek =
+          thisWeekPlan &&
+          Array.isArray(thisWeekPlan.committedDays) &&
+          thisWeekPlan.committedDays.length > 0 &&
+          thisWeekPlan.committedDays.every((day) =>
+            workoutDays.some(
+              (w) =>
+                w.userId === user.id &&
+                w.week === currentWeek &&
+                w.dayOfWeek === day &&
+                w.isCompleted &&
+                (stepsCountThisWeek || w.workoutType !== "steps"),
+            ),
+          )
+            ? 1
+            : 0;
+
+        const goalsThisWeek = userGoals.filter(
+          (g) =>
+            g.isCompleted &&
+            g.completedDate &&
+            currentWeekDateStrs.has(g.completedDate),
+        ).length;
+
+        const pointsThisWeek = cleanThisWeek + bonusThisWeek + goalsThisWeek;
+
+        // --- Plan completion % (past weeks only) ---
+        const pastPlans = weeklyPlans.filter(
+          (p) =>
+            p.userId === user.id &&
+            p.week >= 1 &&
+            p.week < currentWeek &&
+            Array.isArray(p.committedDays) &&
+            p.committedDays.length > 0,
+        );
+        const plansCompleted = pastPlans.filter((plan) => {
+          const levelAtWeek = user.currentConsistencyLevel; // approximation; sparkline-level accuracy not needed here
+          const stepsCount = levelAtWeek >= 5;
+          return plan.committedDays.every((day) =>
+            workoutDays.some(
+              (w) =>
+                w.userId === user.id &&
+                w.week === plan.week &&
+                w.dayOfWeek === day &&
+                w.isCompleted &&
+                (stepsCount || w.workoutType !== "steps"),
+            ),
+          );
+        }).length;
+        const planCompletionPct =
+          pastPlans.length > 0
+            ? Math.round((plansCompleted / pastPlans.length) * 100)
+            : null;
+
+        // --- Sparkline: last N completed weeks ---
+        const sparkline = weekStatuses
+          .slice(-SPARKLINE_WEEKS)
+          .map((ws) => {
+            if (ws.completedWorkouts === 0) return "miss" as const;
+            if (ws.completedWorkouts >= ws.requiredWorkouts) return "clean" as const;
+            return "partial" as const;
+          });
+
         return {
           ...user,
           completedGoals,
@@ -107,6 +250,12 @@ const Dashboard: React.FC<DashboardProps> = ({
           totalWorkouts,
           completionRate,
           stintMissedWeeks,
+          pointsThisWeek,
+          needsMoreThisWeek,
+          planCompletionPct,
+          plansCompleted,
+          plansTotal: pastPlans.length,
+          sparkline,
         };
       })
       .sort((a, b) => {
@@ -125,7 +274,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         // 5. Alphabetical fallback
         return a.name.localeCompare(b.name);
       });
-  }, [users, goals, workoutDays, currentWeek]);
+  }, [users, goals, workoutDays, weeklyPlans, currentWeek]);
 
   // Eliminated users data
   const eliminatedData = useMemo(() => {
@@ -361,6 +510,19 @@ const Dashboard: React.FC<DashboardProps> = ({
             else if (isLowCompletion)
               borderClass = "border-yellow-400 bg-yellow-50";
 
+            const riskPillLabel =
+              isEliminationRisk
+                ? user.needsMoreThisWeek > 0
+                  ? `${user.needsMoreThisWeek} more to be safe`
+                  : "Safe this week ✓"
+                : null;
+
+            const subtextParts = [`Level ${user.currentConsistencyLevel}`];
+            if (user.planCompletionPct !== null) {
+              subtextParts.push(`${user.planCompletionPct}% plans`);
+            }
+            const subtext = subtextParts.join(" · ");
+
             return (
               <div
                 key={user.id}
@@ -380,22 +542,23 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <h3 className="font-semibold text-gray-900 text-sm">
                           {user.name}
                         </h3>
-                        <p className="text-xs text-gray-500">
-                          Level {user.currentConsistencyLevel}
-                        </p>
+                        <p className="text-xs text-gray-500">{subtext}</p>
                       </div>
                     </div>
-                    {isEliminationRisk && (
+                    {riskPillLabel && (
                       <span className="px-1.5 py-0.5 bg-red-100 text-red-800 text-xs font-medium rounded">
-                        1 miss from elimination
+                        {riskPillLabel}
                       </span>
                     )}
-                    {isLowCompletion && (
+                    {!riskPillLabel && isLowCompletion && (
                       <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
                         {completionPct}% completion
                       </span>
                     )}
                   </div>
+                  {user.sparkline.length > 0 && (
+                    <Sparkline cells={user.sparkline} className="mb-3" />
+                  )}
                   <div className="grid grid-cols-5 gap-2 text-center">
                     <div>
                       <div className="text-sm font-bold text-green-600">
@@ -423,74 +586,77 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div>
                       <div className="text-sm font-bold text-orange-600">
-                        {completionPct}%
+                        {user.pointsThisWeek}
                       </div>
-                      <div className="text-[10px] text-gray-500">Done</div>
+                      <div className="text-[10px] text-gray-500">This wk</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Desktop Layout */}
-                <div className="hidden md:flex md:items-center md:justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="text-lg font-bold text-gray-500 w-8">
-                      #{index + 1}
+                <div className="hidden md:block">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className="text-lg font-bold text-gray-500 w-8">
+                        #{index + 1}
+                      </div>
+                      <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center">
+                        {user.avatar || user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">
+                          {user.name}
+                        </h3>
+                        <p className="text-sm text-gray-500">{subtext}</p>
+                      </div>
+                      {riskPillLabel && (
+                        <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded">
+                          {riskPillLabel}
+                        </span>
+                      )}
+                      {!riskPillLabel && isLowCompletion && (
+                        <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+                          {completionPct}% completion
+                        </span>
+                      )}
                     </div>
-                    <div className="w-10 h-10 bg-primary-500 text-white rounded-full flex items-center justify-center">
-                      {user.avatar || user.name.charAt(0)}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">
-                        {user.name}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        Level {user.currentConsistencyLevel}
-                      </p>
-                    </div>
-                    {isEliminationRisk && (
-                      <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded">
-                        1 miss from elimination
-                      </span>
-                    )}
-                    {isLowCompletion && (
-                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
-                        {completionPct}% completion
-                      </span>
-                    )}
-                  </div>
 
-                  <div className="grid grid-cols-5 gap-6 text-center">
-                    <div>
-                      <div className="text-lg font-bold text-green-600">
-                        {user.cleanWeeks}
+                    <div className="grid grid-cols-5 gap-6 text-center">
+                      <div>
+                        <div className="text-lg font-bold text-green-600">
+                          {user.cleanWeeks}
+                        </div>
+                        <div className="text-xs text-gray-500">Clean Weeks</div>
                       </div>
-                      <div className="text-xs text-gray-500">Clean Weeks</div>
-                    </div>
-                    <div>
-                      <div className="text-lg font-bold text-red-600">
-                        {user.missedWeeks}
+                      <div>
+                        <div className="text-lg font-bold text-red-600">
+                          {user.missedWeeks}
+                        </div>
+                        <div className="text-xs text-gray-500">Missed Weeks</div>
                       </div>
-                      <div className="text-xs text-gray-500">Missed Weeks</div>
-                    </div>
-                    <div>
-                      <div className="text-lg font-bold text-blue-600">
-                        {user.completedGoals}
+                      <div>
+                        <div className="text-lg font-bold text-blue-600">
+                          {user.completedGoals}
+                        </div>
+                        <div className="text-xs text-gray-500">Goals Done</div>
                       </div>
-                      <div className="text-xs text-gray-500">Goals Done</div>
-                    </div>
-                    <div>
-                      <div className="text-lg font-bold text-purple-600">
-                        {user.totalPoints}
+                      <div>
+                        <div className="text-lg font-bold text-purple-600">
+                          {user.totalPoints}
+                        </div>
+                        <div className="text-xs text-gray-500">Points</div>
                       </div>
-                      <div className="text-xs text-gray-500">Points</div>
-                    </div>
-                    <div>
-                      <div className="text-lg font-bold text-orange-600">
-                        {completionPct}%
+                      <div>
+                        <div className="text-lg font-bold text-orange-600">
+                          {user.pointsThisWeek}
+                        </div>
+                        <div className="text-xs text-gray-500">This Week</div>
                       </div>
-                      <div className="text-xs text-gray-500">Completion</div>
                     </div>
                   </div>
+                  {user.sparkline.length > 0 && (
+                    <Sparkline cells={user.sparkline} className="mt-3" />
+                  )}
                 </div>
               </div>
             );

@@ -522,6 +522,7 @@ function AppContent() {
               weeklyUpdates={weeklyUpdates}
               proofs={proofs}
               workoutDays={workoutDays}
+              weeklyPlans={weeklyPlans}
             />
           )}
 
