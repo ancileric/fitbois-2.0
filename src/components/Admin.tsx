@@ -19,7 +19,6 @@ interface AdminProps {
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
   onUpdateWorkoutDay: (workoutDay: WorkoutDay) => void;
-  onUpdateAdminSettings: (settings: AdminSettings) => void;
   onRecalculateConsistency?: () => void;
 }
 

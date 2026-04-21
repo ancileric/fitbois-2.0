@@ -306,13 +306,6 @@ function AppContent() {
     }
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const addProof = (_proof: Proof) => {
-    // TODO: Implement API call to save proof to database
-    // const newProofs = [...proofs, proof];
-    // setProofs(newProofs);
-  };
-
   const updateWorkoutDay = async (workoutDay: WorkoutDay) => {
     try {
       console.log("💪 Saving workout to database:", workoutDay);
@@ -380,11 +373,6 @@ function AppContent() {
       showToast(`Failed to save plan: ${msg}`, "error");
       throw error;
     }
-  };
-
-  const updateAdminSettings = (settings: AdminSettings) => {
-    setAdminSettings(settings);
-    // TODO: Implement API call to save admin settings to database
   };
 
   const deleteUser = async (userId: string) => {
@@ -476,7 +464,6 @@ function AppContent() {
               onUpdateUser={updateUser}
               onDeleteUser={deleteUser}
               onUpdateWorkoutDay={updateWorkoutDay}
-              onUpdateAdminSettings={updateAdminSettings}
               onRecalculateConsistency={recalculateUserConsistency}
             />
           )}

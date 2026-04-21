@@ -14,6 +14,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 
+// Per-request debug logs are dev-only noise; errors always surface via console.error.
+const debug = isProduction ? () => {} : console.log;
+
 // CORS configuration
 const corsOptions = {
   origin: isProduction
@@ -245,7 +248,7 @@ app.get("/api/users", (req, res) => {
           : undefined,
     }));
 
-    console.log(`📊 Fetched ${users.length} users`);
+    debug(`Fetched ${users.length} users`);
     res.json(users);
   });
 });
@@ -394,7 +397,7 @@ app.post("/api/users", (req, res) => {
       return;
     }
 
-    console.log(`✅ Created user: ${sanitizedName} (ID: ${id})`);
+    debug(`Created user: ${sanitizedName} (ID: ${id})`);
 
     // Return the created user
     const user = {
@@ -524,7 +527,7 @@ app.put("/api/users/:id", (req, res) => {
       return;
     }
 
-    console.log(`✅ Updated user: ${sanitizedName} (ID: ${req.params.id})`);
+    debug(`Updated user: ${sanitizedName} (ID: ${req.params.id})`);
 
     // Return the updated user
     const user = {
@@ -566,7 +569,7 @@ app.delete("/api/users/:id", (req, res) => {
       return;
     }
 
-    console.log(`🗑️ Deleted user ID: ${req.params.id}`);
+    debug(`Deleted user ID: ${req.params.id}`);
     res.json({ message: "User deleted successfully" });
   });
 });
@@ -603,7 +606,7 @@ app.get("/api/workouts", (req, res) => {
       timestamp: row.timestamp,
     }));
 
-    console.log(`📊 Fetched ${workouts.length} workout records`);
+    debug(`Fetched ${workouts.length} workout records`);
     res.json(workouts);
   });
 });
@@ -636,8 +639,8 @@ app.get("/api/workouts/user/:userId", (req, res) => {
       timestamp: row.timestamp,
     }));
 
-    console.log(
-      `📊 Fetched ${workouts.length} workouts for user ${req.params.userId}`,
+    debug(
+      `Fetched ${workouts.length} workouts for user ${req.params.userId}`,
     );
     res.json(workouts);
   });
@@ -744,8 +747,8 @@ app.post("/api/workouts", (req, res) => {
         return;
       }
 
-      console.log(
-        `✅ Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`,
+      debug(
+        `Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`,
       );
 
       const workout = {
@@ -782,7 +785,7 @@ app.delete("/api/workouts/:id", (req, res) => {
       return;
     }
 
-    console.log(`🗑️ Deleted workout ID: ${req.params.id}`);
+    debug(`Deleted workout ID: ${req.params.id}`);
     res.json({ message: "Workout deleted successfully" });
   });
 });
@@ -852,7 +855,7 @@ app.get("/api/goals", (req, res) => {
       proofs: [], // Will be populated when proofs table is implemented
     }));
 
-    console.log(`📊 Fetched ${goals.length} goals`);
+    debug(`Fetched ${goals.length} goals`);
     res.json(goals);
   });
 });
@@ -884,8 +887,8 @@ app.get("/api/goals/user/:userId", (req, res) => {
       proofs: [], // Will be populated when proofs table is implemented
     }));
 
-    console.log(
-      `📊 Fetched ${goals.length} goals for user ${req.params.userId}`,
+    debug(
+      `Fetched ${goals.length} goals for user ${req.params.userId}`,
     );
     res.json(goals);
   });
@@ -927,7 +930,7 @@ app.get("/api/goals/:id", (req, res) => {
 app.post("/api/goals", (req, res) => {
   const { userId, category, description, isDifficult } = req.body;
 
-  console.log("📝 Goal creation request:", {
+  debug("Goal creation request:", {
     userId,
     category,
     description,
@@ -1006,8 +1009,8 @@ app.post("/api/goals", (req, res) => {
         return;
       }
 
-      console.log(
-        `✅ Created goal: ${sanitizedDescription} for user ${userId}`,
+      debug(
+        `Created goal: ${sanitizedDescription} for user ${userId}`,
       );
 
       // Return the created goal
@@ -1074,7 +1077,7 @@ app.put("/api/goals/:id", (req, res) => {
       return;
     }
 
-    console.log(`✅ Updated goal: ${req.params.id}`);
+    debug(`Updated goal: ${req.params.id}`);
 
     // Fetch and return the updated goal
     const selectQuery = `SELECT * FROM goals WHERE id = ?`;
@@ -1117,7 +1120,7 @@ app.delete("/api/goals/:id", (req, res) => {
       return;
     }
 
-    console.log(`🗑️ Deleted goal ID: ${req.params.id}`);
+    debug(`Deleted goal ID: ${req.params.id}`);
     res.json({ message: "Goal deleted successfully" });
   });
 });
@@ -1186,7 +1189,7 @@ app.get("/api/weekly-plans", (req, res) => {
       return;
     }
     const plans = rows.map(serializeWeeklyPlan);
-    console.log(`📊 Fetched ${plans.length} weekly plans`);
+    debug(`Fetched ${plans.length} weekly plans`);
     res.json(plans);
   });
 });
@@ -1323,8 +1326,8 @@ app.post("/api/weekly-plans", (req, res) => {
                 res.status(500).json({ error: errRun.message });
                 return;
               }
-              console.log(
-                `✅ Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
+              debug(
+                `Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
               );
               res.json({
                 id,
@@ -1397,7 +1400,7 @@ app.delete("/api/weekly-plans/:userId/:week", (req, res) => {
         res.status(404).json({ error: "Weekly plan not found" });
         return;
       }
-      console.log(`🗑️ Deleted weekly plan for user ${userId}, week ${week}`);
+      debug(`Deleted weekly plan for user ${userId}, week ${week}`);
       res.json({ message: "Weekly plan deleted" });
     }
   );

@@ -147,17 +147,14 @@ class ApiService {
   // ==================== USER METHODS ====================
 
   async getUsers(): Promise<User[]> {
-    console.log('🔍 Fetching users from database...');
     return this.fetchApi<User[]>('/users');
   }
 
   async getUser(id: string): Promise<User> {
-    console.log(`🔍 Fetching user ${id} from database...`);
     return this.fetchApi<User>(`/users/${id}`);
   }
 
   async createUser(userData: Partial<User>): Promise<User> {
-    console.log('➕ Creating user in database...', userData);
     return this.fetchApi<User>('/users', {
       method: 'POST',
       body: JSON.stringify(userData),
@@ -165,7 +162,6 @@ class ApiService {
   }
 
   async updateUser(id: string, userData: Partial<User>): Promise<User> {
-    console.log(`✏️ Updating user ${id} in database...`, userData);
     return this.fetchApi<User>(`/users/${id}`, {
       method: 'PUT',
       body: JSON.stringify(userData),
@@ -173,7 +169,6 @@ class ApiService {
   }
 
   async deleteUser(id: string): Promise<void> {
-    console.log(`🗑️ Deleting user ${id} from database...`);
     await this.fetchApi<void>(`/users/${id}`, {
       method: 'DELETE',
     });
@@ -182,22 +177,18 @@ class ApiService {
   // ==================== WORKOUT METHODS ====================
 
   async getAllWorkouts(): Promise<WorkoutDay[]> {
-    console.log('🔍 Fetching all workouts from database...');
     return this.fetchApi<WorkoutDay[]>('/workouts');
   }
 
   async getUserWorkouts(userId: string): Promise<WorkoutDay[]> {
-    console.log(`🔍 Fetching all workouts for user ${userId}...`);
     return this.fetchApi<WorkoutDay[]>(`/workouts/user/${userId}`);
   }
 
   async getWorkouts(userId: string, week: number): Promise<WorkoutDay[]> {
-    console.log(`🔍 Fetching workouts for user ${userId}, week ${week}...`);
     return this.fetchApi<WorkoutDay[]>(`/workouts/${userId}/${week}`);
   }
 
   async saveWorkout(workoutData: Partial<WorkoutDay>): Promise<WorkoutDay> {
-    console.log('💪 Saving workout to database...', workoutData);
     return this.fetchApi<WorkoutDay>('/workouts', {
       method: 'POST',
       body: JSON.stringify(workoutData),
@@ -205,7 +196,6 @@ class ApiService {
   }
 
   async deleteWorkout(id: string): Promise<void> {
-    console.log(`🗑️ Deleting workout ${id} from database...`);
     await this.fetchApi<void>(`/workouts/${id}`, {
       method: 'DELETE',
     });
@@ -218,7 +208,6 @@ class ApiService {
     latestWeek: number;
     completionRate: number;
   }> {
-    console.log(`📊 Fetching workout stats for user ${userId}...`);
     return this.fetchApi(`/workouts/stats/${userId}`);
   }
 
@@ -231,22 +220,18 @@ class ApiService {
   // ==================== GOALS METHODS ====================
 
   async getAllGoals(): Promise<Goal[]> {
-    console.log('🔍 Fetching all goals from database...');
     return this.fetchApi<Goal[]>('/goals');
   }
 
   async getUserGoals(userId: string): Promise<Goal[]> {
-    console.log(`🔍 Fetching goals for user ${userId}...`);
     return this.fetchApi<Goal[]>(`/goals/user/${userId}`);
   }
 
   async getGoal(id: string): Promise<Goal> {
-    console.log(`🔍 Fetching goal ${id} from database...`);
     return this.fetchApi<Goal>(`/goals/${id}`);
   }
 
   async createGoal(goalData: Partial<Goal>): Promise<Goal> {
-    console.log('➕ Creating goal in database...', goalData);
     return this.fetchApi<Goal>('/goals', {
       method: 'POST',
       body: JSON.stringify(goalData),
@@ -254,7 +239,6 @@ class ApiService {
   }
 
   async updateGoal(id: string, goalData: Partial<Goal>): Promise<Goal> {
-    console.log(`✏️ Updating goal ${id} in database...`, goalData);
     return this.fetchApi<Goal>(`/goals/${id}`, {
       method: 'PUT',
       body: JSON.stringify(goalData),
@@ -262,7 +246,6 @@ class ApiService {
   }
 
   async deleteGoal(id: string): Promise<void> {
-    console.log(`🗑️ Deleting goal ${id} from database...`);
     await this.fetchApi<void>(`/goals/${id}`, {
       method: 'DELETE',
     });
@@ -275,19 +258,16 @@ class ApiService {
     categoriesCovered: number;
     completionRate: number;
   }> {
-    console.log(`📊 Fetching goal stats for user ${userId}...`);
     return this.fetchApi(`/goals/stats/${userId}`);
   }
 
   // ==================== WEEKLY PLANS METHODS ====================
 
   async getWeeklyPlans(): Promise<WeeklyPlan[]> {
-    console.log('🔍 Fetching all weekly plans from database...');
     return this.fetchApi<WeeklyPlan[]>('/weekly-plans');
   }
 
   async getWeeklyPlan(userId: string, week: number): Promise<WeeklyPlan> {
-    console.log(`🔍 Fetching weekly plan for user ${userId}, week ${week}...`);
     return this.fetchApi<WeeklyPlan>(`/weekly-plans/${userId}/${week}`);
   }
 
@@ -297,7 +277,6 @@ class ApiService {
     committedDays: number[];
     createdBy?: 'user' | 'admin';
   }): Promise<WeeklyPlan> {
-    console.log('📅 Saving weekly plan...', plan);
     return this.fetchApi<WeeklyPlan>('/weekly-plans', {
       method: 'POST',
       body: JSON.stringify(plan),
@@ -305,7 +284,6 @@ class ApiService {
   }
 
   async deleteWeeklyPlan(userId: string, week: number): Promise<void> {
-    console.log(`🗑️ Deleting weekly plan for user ${userId}, week ${week}...`);
     await this.fetchApi<void>(`/weekly-plans/${userId}/${week}`, {
       method: 'DELETE',
     });
@@ -315,11 +293,10 @@ class ApiService {
 
   async testConnection(): Promise<boolean> {
     try {
-      const health = await this.healthCheck();
-      console.log('✅ Database connection test successful:', health);
+      await this.healthCheck();
       return true;
     } catch (error) {
-      console.error('❌ Database connection test failed:', error);
+      console.error('Database connection test failed:', error);
       return false;
     }
   }
