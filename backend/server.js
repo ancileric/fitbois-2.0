@@ -1218,7 +1218,7 @@ app.get("/api/weekly-plans/:userId/:week", (req, res) => {
 
 // POST upsert a weekly plan
 app.post("/api/weekly-plans", (req, res) => {
-  const { userId, week, committedDays, createdBy } = req.body;
+  const { userId, week, committedDays, createdBy, override } = req.body;
 
   if (!userId || typeof userId !== "string") {
     res.status(400).json({ error: "userId is required" });
@@ -1251,6 +1251,7 @@ app.post("/api/weekly-plans", (req, res) => {
   const validCreatedBy = ["user", "admin"].includes(createdBy)
     ? createdBy
     : "admin";
+  const isAdminOverride = validCreatedBy === "admin" && override === true;
 
   db.get(
     `SELECT id, current_consistency_level, is_active FROM users WHERE id = ?`,
@@ -1280,7 +1281,7 @@ app.post("/api/weekly-plans", (req, res) => {
       }
 
       const currentWeek = getCurrentWeekIST();
-      if (currentWeek > 0 && weekNum < currentWeek) {
+      if (!isAdminOverride && currentWeek > 0 && weekNum < currentWeek) {
         res
           .status(400)
           .json({ error: "Cannot submit a plan for a past week" });
@@ -1340,7 +1341,8 @@ app.post("/api/weekly-plans", (req, res) => {
 
       // Lock check: only applies to the current week. Future weeks are
       // always editable; past weeks were rejected above.
-      if (weekNum === currentWeek) {
+      // Admin override (createdBy:"admin" + override:true) bypasses lock.
+      if (!isAdminOverride && weekNum === currentWeek) {
         if (currentISTDayOfWeek() > 1) {
           res.status(403).json({
             error:
