@@ -32,8 +32,8 @@ app.use(cors(corsOptions));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Serve static files from React build in production
-if (isProduction) {
+// Serve React build if present (production deploys; harmless otherwise).
+{
   const buildPath = path.join(__dirname, "..", "build");
   if (fs.existsSync(buildPath)) {
     app.use(express.static(buildPath));
@@ -1400,17 +1400,15 @@ app.get("/api/health", (req, res) => {
 
 // ==================== CATCH-ALL FOR REACT SPA ====================
 
-// In production, serve React app for any non-API routes
-if (isProduction) {
-  app.get("*", (req, res) => {
-    const buildPath = path.join(__dirname, "..", "build", "index.html");
-    if (fs.existsSync(buildPath)) {
-      res.sendFile(buildPath);
-    } else {
-      res.status(404).json({ error: "Frontend build not found" });
-    }
-  });
-}
+// SPA fallback: serve React index.html for any non-API route when build present.
+app.get("*", (req, res) => {
+  const indexPath = path.join(__dirname, "..", "build", "index.html");
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ error: "Frontend build not found" });
+  }
+});
 
 // ==================== START SERVER ====================
 
