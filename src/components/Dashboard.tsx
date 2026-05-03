@@ -9,6 +9,11 @@ import {
 } from "../utils/dateUtils";
 import { calculateAllWeekStatuses, calculateStintMissedWeeks, calculateLevelHistory, LevelPoint } from "../utils/consistencyCalculator";
 import LevelTimeline from "./LevelTimeline";
+import WeeklyRecap from "./WeeklyRecap";
+import GoalCategoryProgress from "./GoalCategoryProgress";
+import WorkoutTrends from "./WorkoutTrends";
+import MilestonesFeed from "./MilestonesFeed";
+import HeadToHead from "./HeadToHead";
 import { Calendar, Users, ChevronDown, ChevronUp } from "lucide-react";
 
 interface DashboardProps {
@@ -243,6 +248,23 @@ const Dashboard: React.FC<DashboardProps> = ({
             return "partial" as const;
           });
 
+        // --- Current clean streak (consecutive clean weeks ending at latest) ---
+        let currentStreak = 0;
+        for (let i = weekStatuses.length - 1; i >= 0; i--) {
+          if (weekStatuses[i].completedWorkouts >= weekStatuses[i].requiredWorkouts) {
+            currentStreak++;
+          } else {
+            break;
+          }
+        }
+
+        // --- Points projection (extrapolate to 28-week challenge) ---
+        const totalChallengeWeeks = 28;
+        const weeksElapsed = Math.max(1, currentWeek);
+        const projectedPoints = Math.round(
+          (user.totalPoints / weeksElapsed) * totalChallengeWeeks
+        );
+
         return {
           ...user,
           completedGoals,
@@ -256,6 +278,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           plansCompleted,
           plansTotal: pastPlans.length,
           sparkline,
+          currentStreak,
+          projectedPoints,
         };
       })
       .sort((a, b) => {
@@ -493,6 +517,14 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
+      {/* Weekly Recap */}
+      <WeeklyRecap
+        users={users}
+        goals={goals}
+        workoutDays={workoutDays}
+        currentWeek={currentWeek}
+      />
+
       {/* Leaderboard */}
       <div className="bg-white rounded-xl p-4 border border-gray-100">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -518,6 +550,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                 : null;
 
             const subtextParts = [`Level ${user.currentConsistencyLevel}`];
+            if (user.currentStreak > 0) {
+              subtextParts.push(`${user.currentStreak}w streak 🔥`);
+            }
             if (user.planCompletionPct !== null) {
               subtextParts.push(`${user.planCompletionPct}% plans`);
             }
@@ -559,7 +594,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   {user.sparkline.length > 0 && (
                     <Sparkline cells={user.sparkline} className="mb-3" />
                   )}
-                  <div className="grid grid-cols-5 gap-2 text-center">
+                  <div className="grid grid-cols-6 gap-2 text-center">
                     <div>
                       <div className="text-sm font-bold text-green-600">
                         {user.cleanWeeks}
@@ -589,6 +624,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                         {user.pointsThisWeek}
                       </div>
                       <div className="text-[10px] text-gray-500">This wk</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-gray-400">
+                        ~{user.projectedPoints}
+                      </div>
+                      <div className="text-[10px] text-gray-500">Proj.</div>
                     </div>
                   </div>
                 </div>
@@ -621,7 +662,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-5 gap-6 text-center">
+                    <div className="grid grid-cols-6 gap-5 text-center">
                       <div>
                         <div className="text-lg font-bold text-green-600">
                           {user.cleanWeeks}
@@ -651,6 +692,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                           {user.pointsThisWeek}
                         </div>
                         <div className="text-xs text-gray-500">This Week</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold text-gray-400">
+                          ~{user.projectedPoints}
+                        </div>
+                        <div className="text-xs text-gray-500">Projected</div>
                       </div>
                     </div>
                   </div>
@@ -722,6 +769,31 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Milestones Feed */}
+      <MilestonesFeed
+        users={users}
+        goals={goals}
+        workoutDays={workoutDays}
+        currentWeek={currentWeek}
+      />
+
+      {/* Goal Category Progress */}
+      <GoalCategoryProgress goals={goals} />
+
+      {/* Workout Trends */}
+      <WorkoutTrends
+        users={users}
+        workoutDays={workoutDays}
+        currentWeek={currentWeek}
+      />
+
+      {/* Head to Head */}
+      <HeadToHead
+        users={users}
+        goals={goals}
+        workoutDays={workoutDays}
+      />
 
       {/* Level Progress - Collapsible */}
       <div className="bg-white rounded-xl border border-gray-100">
