@@ -1,26 +1,22 @@
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
-// const multer = require("multer");
-
-// Configure multer for file uploads
-// const upload = multer({ dest: "/tmp/" });
+const db = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
+const isVercel = process.env.VERCEL === "1";
 
-// Per-request debug logs are dev-only noise; errors always surface via console.error.
 const debug = isProduction ? () => {} : console.log;
 
 // CORS configuration
 const corsOptions = {
   origin: isProduction
-    ? process.env.FRONTEND_URL || true // Allow configured frontend URL or any in production
+    ? process.env.FRONTEND_URL || true
     : ["http://localhost:3000", "http://127.0.0.1:3000"],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -32,8 +28,8 @@ app.use(cors(corsOptions));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Serve React build if present (production deploys; harmless otherwise).
-{
+// Serve static files from React build (standalone mode only, Vercel handles this itself)
+if (isProduction && !isVercel) {
   const buildPath = path.join(__dirname, "..", "build");
   if (fs.existsSync(buildPath)) {
     app.use(express.static(buildPath));
@@ -41,60 +37,120 @@ app.use(bodyParser.urlencoded({ extended: true }));
   }
 }
 
-// Database connection
-const dbDir = path.join(__dirname, "database");
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-const dbPath = path.join(dbDir, "fitbois.db");
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error("Error opening database:", err.message);
-    process.exit(1);
-  }
-  console.log("✅ Connected to SQLite database at:", dbPath);
-});
+// ==================== DATABASE INITIALIZATION ====================
 
-// Enable foreign keys
-db.run("PRAGMA foreign_keys = ON");
+let initPromise = null;
 
-// Run schema migrations for existing databases
-db.run(
-  "ALTER TABLE users ADD COLUMN reactivated_at_week INTEGER",
-  (err) => {
-    if (err && !err.message.includes("duplicate column name")) {
-      console.error("Migration error (reactivated_at_week):", err.message);
-    } else {
-      console.log("✅ Migration: reactivated_at_week column ready");
-    }
-  }
-);
+async function runDatabaseInit() {
+  console.log("🚀 Initializing database...");
 
-// Create weekly_plans table if it doesn't exist (self-heal for existing DBs)
-db.run(
-  `CREATE TABLE IF NOT EXISTS weekly_plans (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    week INTEGER NOT NULL,
-    committed_days TEXT NOT NULL,
-    committed_at TEXT NOT NULL,
-    created_by TEXT NOT NULL DEFAULT 'admin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-    UNIQUE(user_id, week)
-  )`,
-  (err) => {
-    if (err) {
-      console.error("Error creating weekly_plans table:", err.message);
-    } else {
-      console.log("✅ Migration: weekly_plans table ready");
-    }
-  }
-);
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      avatar TEXT,
+      start_date TEXT NOT NULL,
+      current_consistency_level INTEGER NOT NULL DEFAULT 5,
+      clean_weeks INTEGER NOT NULL DEFAULT 0,
+      missed_weeks INTEGER NOT NULL DEFAULT 0,
+      total_points INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT 1,
+      special_starting_level INTEGER,
+      reactivated_at_week INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
-// Create indexes if they don't exist (for existing databases)
-const createIndexes = () => {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      is_difficult BOOLEAN NOT NULL DEFAULT 0,
+      is_completed BOOLEAN NOT NULL DEFAULT 0,
+      completed_date TEXT,
+      created_date TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, category)
+    )
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS workout_days (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      day_of_week INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      is_completed BOOLEAN NOT NULL DEFAULT 0,
+      workout_type TEXT,
+      notes TEXT,
+      marked_by TEXT NOT NULL DEFAULT 'admin',
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week, day_of_week)
+    )
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS proofs (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      url TEXT NOT NULL,
+      description TEXT,
+      timestamp TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE SET NULL
+    )
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS weekly_updates (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      update_count INTEGER NOT NULL,
+      required_updates INTEGER NOT NULL,
+      is_complete BOOLEAN NOT NULL DEFAULT 0,
+      submitted_date TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week, year)
+    )
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS weekly_plans (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      committed_days TEXT NOT NULL,
+      committed_at TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT 'admin',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week)
+    )
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_settings (
+      id INTEGER PRIMARY KEY,
+      challenge_start_date TEXT NOT NULL,
+      challenge_end_date TEXT NOT NULL,
+      current_week INTEGER NOT NULL DEFAULT 1,
+      is_active BOOLEAN NOT NULL DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   const indexes = [
     "CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id)",
     "CREATE INDEX IF NOT EXISTS idx_workout_week ON workout_days (week)",
@@ -105,14 +161,36 @@ const createIndexes = () => {
     "CREATE INDEX IF NOT EXISTS idx_weekly_plans_week ON weekly_plans (week)",
   ];
 
-  indexes.forEach((sql) => {
-    db.run(sql, (err) => {
-      if (err) console.error("Index creation error:", err.message);
+  for (const sql of indexes) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      console.error("Index creation error:", err.message);
+    }
+  }
+
+  console.log("✅ Database initialization complete");
+}
+
+function ensureInit() {
+  if (!initPromise) {
+    initPromise = runDatabaseInit().catch((err) => {
+      initPromise = null;
+      throw err;
     });
-  });
-  console.log("✅ Database indexes verified");
-};
-createIndexes();
+  }
+  return initPromise;
+}
+
+app.use(async (req, res, next) => {
+  try {
+    await ensureInit();
+    next();
+  } catch (err) {
+    console.error("Database init error:", err);
+    res.status(500).json({ error: "Server initialization failed" });
+  }
+});
 
 // ==================== INPUT VALIDATION HELPERS ====================
 
@@ -175,7 +253,6 @@ const validateGoalCategory = (value) => {
 
 const sanitizeString = (value) => {
   if (typeof value !== "string") return value;
-  // Remove potentially dangerous characters while preserving useful ones
   return value.trim().replace(/[<>]/g, "");
 };
 
@@ -184,7 +261,6 @@ const sanitizeString = (value) => {
 const CHALLENGE_START_UTC_MS = Date.UTC(2026, 0, 19);
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-// Returns the current challenge week (1-based) in IST, or 0 before start.
 const getCurrentWeekIST = () => {
   const istNow = new Date(Date.now() + IST_OFFSET_MS);
   const istMidnightUTC = Date.UTC(
@@ -199,10 +275,9 @@ const getCurrentWeekIST = () => {
   return Math.floor(daysDiff / 7) + 1;
 };
 
-// Returns 1 (Monday) through 7 (Sunday) in IST.
 const currentISTDayOfWeek = () => {
   const istNow = new Date(Date.now() + IST_OFFSET_MS);
-  const jsDow = istNow.getUTCDay(); // 0=Sun..6=Sat
+  const jsDow = istNow.getUTCDay();
   return jsDow === 0 ? 7 : jsDow;
 };
 
@@ -210,25 +285,17 @@ const requiredWorkoutsForLevel = (level) => (Number(level) >= 5 ? 5 : 4);
 
 // ==================== USER ROUTES ====================
 
-// GET all users
-app.get("/api/users", (req, res) => {
-  const query = `
-    SELECT
-      id, name, avatar, start_date, current_consistency_level,
-      clean_weeks, missed_weeks, total_points, is_active,
-      special_starting_level, reactivated_at_week, created_at, updated_at
-    FROM users
-    ORDER BY name COLLATE NOCASE ASC
-  `;
+app.get("/api/users", async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT
+        id, name, avatar, start_date, current_consistency_level,
+        clean_weeks, missed_weeks, total_points, is_active,
+        special_starting_level, reactivated_at_week, created_at, updated_at
+      FROM users
+      ORDER BY name COLLATE NOCASE ASC
+    `);
 
-  db.all(query, [], (err, rows) => {
-    if (err) {
-      console.error("Error fetching users:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    // Transform database format to frontend format
     const users = rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -250,26 +317,22 @@ app.get("/api/users", (req, res) => {
 
     debug(`Fetched ${users.length} users`);
     res.json(users);
-  });
+  } catch (err) {
+    console.error("Error fetching users:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET single user by ID
-app.get("/api/users/:id", (req, res) => {
-  const query = `
-    SELECT
-      id, name, avatar, start_date, current_consistency_level,
-      clean_weeks, missed_weeks, total_points, is_active,
-      special_starting_level, reactivated_at_week, created_at, updated_at
-    FROM users
-    WHERE id = ?
-  `;
-
-  db.get(query, [req.params.id], (err, row) => {
-    if (err) {
-      console.error("Error fetching user:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/users/:id", async (req, res) => {
+  try {
+    const row = await db.get(
+      `SELECT
+        id, name, avatar, start_date, current_consistency_level,
+        clean_weeks, missed_weeks, total_points, is_active,
+        special_starting_level, reactivated_at_week, created_at, updated_at
+      FROM users WHERE id = ?`,
+      [req.params.id]
+    );
 
     if (!row) {
       res.status(404).json({ error: "User not found" });
@@ -296,11 +359,13 @@ app.get("/api/users/:id", (req, res) => {
     };
 
     res.json(user);
-  });
+  } catch (err) {
+    console.error("Error fetching user:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// POST create new user
-app.post("/api/users", (req, res) => {
+app.post("/api/users", async (req, res) => {
   const {
     name,
     avatar,
@@ -311,14 +376,12 @@ app.post("/api/users", (req, res) => {
     specialRules,
   } = req.body;
 
-  // Validate required fields
   const nameError = validateString(name, "Name", 1, 100);
   if (nameError) {
     res.status(400).json({ error: nameError });
     return;
   }
 
-  // Validate optional fields
   if (avatar) {
     const avatarError = validateString(avatar, "Avatar", 1, 10);
     if (avatarError) {
@@ -353,7 +416,7 @@ app.post("/api/users", (req, res) => {
 
   if (specialRules?.startingLevel !== undefined) {
     const startingLevelError = validateConsistencyLevel(
-      specialRules.startingLevel,
+      specialRules.startingLevel
     );
     if (startingLevelError) {
       res
@@ -363,43 +426,35 @@ app.post("/api/users", (req, res) => {
     }
   }
 
-  const id = uuidv4();
-  const startDate = "2026-01-19"; // Challenge start date
-  const sanitizedName = sanitizeString(name);
-  const sanitizedAvatar = avatar
-    ? sanitizeString(avatar)
-    : sanitizedName.charAt(0).toUpperCase();
+  try {
+    const id = uuidv4();
+    const startDate = "2026-01-19";
+    const sanitizedName = sanitizeString(name);
+    const sanitizedAvatar = avatar
+      ? sanitizeString(avatar)
+      : sanitizedName.charAt(0).toUpperCase();
 
-  const query = `
-    INSERT INTO users (
-      id, name, avatar, start_date, current_consistency_level,
-      clean_weeks, missed_weeks, total_points, is_active, special_starting_level
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-
-  const params = [
-    id,
-    sanitizedName,
-    sanitizedAvatar,
-    startDate,
-    currentConsistencyLevel || 5,
-    cleanWeeks || 0,
-    missedWeeks || 0,
-    0, // total_points starts at 0
-    isActive !== false ? 1 : 0,
-    specialRules?.startingLevel || null,
-  ];
-
-  db.run(query, params, function (err) {
-    if (err) {
-      console.error("Error creating user:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+    await db.run(
+      `INSERT INTO users (
+        id, name, avatar, start_date, current_consistency_level,
+        clean_weeks, missed_weeks, total_points, is_active, special_starting_level
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        sanitizedName,
+        sanitizedAvatar,
+        startDate,
+        currentConsistencyLevel || 5,
+        cleanWeeks || 0,
+        missedWeeks || 0,
+        0,
+        isActive !== false ? 1 : 0,
+        specialRules?.startingLevel || null,
+      ]
+    );
 
     debug(`Created user: ${sanitizedName} (ID: ${id})`);
 
-    // Return the created user
     const user = {
       id,
       name: sanitizedName,
@@ -411,18 +466,18 @@ app.post("/api/users", (req, res) => {
       totalPoints: 0,
       isActive: isActive !== false,
       specialRules: specialRules?.startingLevel
-        ? {
-            startingLevel: specialRules.startingLevel,
-          }
+        ? { startingLevel: specialRules.startingLevel }
         : undefined,
     };
 
     res.status(201).json(user);
-  });
+  } catch (err) {
+    console.error("Error creating user:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// PUT update user
-app.put("/api/users/:id", (req, res) => {
+app.put("/api/users/:id", async (req, res) => {
   const {
     name,
     avatar,
@@ -434,14 +489,12 @@ app.put("/api/users/:id", (req, res) => {
     specialRules,
   } = req.body;
 
-  // Validate required fields
   const nameError = validateString(name, "Name", 1, 100);
   if (nameError) {
     res.status(400).json({ error: nameError });
     return;
   }
 
-  // Validate optional fields
   if (avatar) {
     const avatarError = validateString(avatar, "Avatar", 1, 10);
     if (avatarError) {
@@ -482,54 +535,46 @@ app.put("/api/users/:id", (req, res) => {
     }
   }
 
-  const sanitizedName = sanitizeString(name);
-  const sanitizedAvatar = avatar
-    ? sanitizeString(avatar)
-    : sanitizedName.charAt(0).toUpperCase();
+  try {
+    const sanitizedName = sanitizeString(name);
+    const sanitizedAvatar = avatar
+      ? sanitizeString(avatar)
+      : sanitizedName.charAt(0).toUpperCase();
 
-  const query = `
-    UPDATE users SET
-      name = ?,
-      avatar = ?,
-      current_consistency_level = ?,
-      clean_weeks = ?,
-      missed_weeks = ?,
-      total_points = ?,
-      is_active = ?,
-      special_starting_level = ?,
-      reactivated_at_week = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `;
+    const result = await db.run(
+      `UPDATE users SET
+        name = ?,
+        avatar = ?,
+        current_consistency_level = ?,
+        clean_weeks = ?,
+        missed_weeks = ?,
+        total_points = ?,
+        is_active = ?,
+        special_starting_level = ?,
+        reactivated_at_week = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`,
+      [
+        sanitizedName,
+        sanitizedAvatar,
+        currentConsistencyLevel,
+        cleanWeeks,
+        missedWeeks,
+        totalPoints,
+        isActive ? 1 : 0,
+        specialRules?.startingLevel || null,
+        specialRules?.reactivatedAtWeek || null,
+        req.params.id,
+      ]
+    );
 
-  const params = [
-    sanitizedName,
-    sanitizedAvatar,
-    currentConsistencyLevel,
-    cleanWeeks,
-    missedWeeks,
-    totalPoints,
-    isActive ? 1 : 0,
-    specialRules?.startingLevel || null,
-    specialRules?.reactivatedAtWeek || null,
-    req.params.id,
-  ];
-
-  db.run(query, params, function (err) {
-    if (err) {
-      console.error("Error updating user:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
+    if (result.changes === 0) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     debug(`Updated user: ${sanitizedName} (ID: ${req.params.id})`);
 
-    // Return the updated user
     const user = {
       id: req.params.id,
       name: sanitizedName,
@@ -550,47 +595,41 @@ app.put("/api/users/:id", (req, res) => {
     };
 
     res.json(user);
-  });
+  } catch (err) {
+    console.error("Error updating user:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// DELETE user
-app.delete("/api/users/:id", (req, res) => {
-  const query = "DELETE FROM users WHERE id = ?";
+app.delete("/api/users/:id", async (req, res) => {
+  try {
+    const result = await db.run("DELETE FROM users WHERE id = ?", [
+      req.params.id,
+    ]);
 
-  db.run(query, [req.params.id], function (err) {
-    if (err) {
-      console.error("Error deleting user:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
+    if (result.changes === 0) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     debug(`Deleted user ID: ${req.params.id}`);
     res.json({ message: "User deleted successfully" });
-  });
+  } catch (err) {
+    console.error("Error deleting user:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== WORKOUT ROUTES ====================
 
-// GET all workouts (for admin overview)
-app.get("/api/workouts", (req, res) => {
-  const query = `
-    SELECT wd.*, u.name as user_name 
-    FROM workout_days wd
-    JOIN users u ON wd.user_id = u.id
-    ORDER BY wd.week DESC, wd.day_of_week ASC
-  `;
-
-  db.all(query, [], (err, rows) => {
-    if (err) {
-      console.error("Error fetching all workouts:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/workouts", async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT wd.*, u.name as user_name
+      FROM workout_days wd
+      JOIN users u ON wd.user_id = u.id
+      ORDER BY wd.week DESC, wd.day_of_week ASC
+    `);
 
     const workouts = rows.map((row) => ({
       id: row.id,
@@ -608,23 +647,20 @@ app.get("/api/workouts", (req, res) => {
 
     debug(`Fetched ${workouts.length} workout records`);
     res.json(workouts);
-  });
+  } catch (err) {
+    console.error("Error fetching all workouts:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET workout days for a specific user
-app.get("/api/workouts/user/:userId", (req, res) => {
-  const query = `
-    SELECT * FROM workout_days 
-    WHERE user_id = ?
-    ORDER BY week DESC, day_of_week ASC
-  `;
-
-  db.all(query, [req.params.userId], (err, rows) => {
-    if (err) {
-      console.error("Error fetching user workouts:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/workouts/user/:userId", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT * FROM workout_days
+      WHERE user_id = ?
+      ORDER BY week DESC, day_of_week ASC`,
+      [req.params.userId]
+    );
 
     const workouts = rows.map((row) => ({
       id: row.id,
@@ -640,26 +676,23 @@ app.get("/api/workouts/user/:userId", (req, res) => {
     }));
 
     debug(
-      `Fetched ${workouts.length} workouts for user ${req.params.userId}`,
+      `Fetched ${workouts.length} workouts for user ${req.params.userId}`
     );
     res.json(workouts);
-  });
+  } catch (err) {
+    console.error("Error fetching user workouts:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET workout days for a user and week
-app.get("/api/workouts/:userId/:week", (req, res) => {
-  const query = `
-    SELECT * FROM workout_days 
-    WHERE user_id = ? AND week = ?
-    ORDER BY day_of_week
-  `;
-
-  db.all(query, [req.params.userId, req.params.week], (err, rows) => {
-    if (err) {
-      console.error("Error fetching workouts:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/workouts/:userId/:week", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT * FROM workout_days
+      WHERE user_id = ? AND week = ?
+      ORDER BY day_of_week`,
+      [req.params.userId, req.params.week]
+    );
 
     const workouts = rows.map((row) => ({
       id: row.id,
@@ -675,11 +708,13 @@ app.get("/api/workouts/:userId/:week", (req, res) => {
     }));
 
     res.json(workouts);
-  });
+  } catch (err) {
+    console.error("Error fetching workouts:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// POST/PUT workout day (upsert) - Uses INSERT OR REPLACE to avoid race conditions
-app.post("/api/workouts", (req, res) => {
+app.post("/api/workouts", async (req, res) => {
   const {
     userId,
     week,
@@ -692,122 +727,100 @@ app.post("/api/workouts", (req, res) => {
   } = req.body;
 
   if (!userId || !week || !dayOfWeek || !date) {
-    res
-      .status(400)
-      .json({
-        error: "Missing required fields: userId, week, dayOfWeek, date",
-      });
+    res.status(400).json({
+      error: "Missing required fields: userId, week, dayOfWeek, date",
+    });
     return;
   }
 
-  // Validate markedBy field
   const validMarkedBy = ["user", "admin"].includes(markedBy)
     ? markedBy
     : "admin";
 
   const timestamp = new Date().toISOString();
 
-  // First, check if a record exists to preserve the ID
-  const checkQuery = `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`;
-
-  db.get(checkQuery, [userId, week, dayOfWeek], (err, existingRow) => {
-    if (err) {
-      console.error("Error checking existing workout:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const existingRow = await db.get(
+      `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`,
+      [userId, week, dayOfWeek]
+    );
 
     const id = existingRow?.id || uuidv4();
 
-    // Use INSERT OR REPLACE to handle race conditions atomically
-    const upsertQuery = `
-      INSERT OR REPLACE INTO workout_days (
+    await db.run(
+      `INSERT OR REPLACE INTO workout_days (
         id, user_id, week, day_of_week, date, is_completed,
         workout_type, notes, marked_by, timestamp
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const params = [
-      id,
-      userId,
-      week,
-      dayOfWeek,
-      date,
-      isCompleted ? 1 : 0,
-      workoutType || null,
-      notes || null,
-      validMarkedBy,
-      timestamp,
-    ];
-
-    db.run(upsertQuery, params, function (err) {
-      if (err) {
-        console.error("Error upserting workout:", err.message);
-        res.status(500).json({ error: err.message });
-        return;
-      }
-
-      debug(
-        `Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`,
-      );
-
-      const workout = {
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
         id,
         userId,
         week,
         dayOfWeek,
         date,
-        isCompleted,
-        workoutType: workoutType || null,
-        notes: notes || null,
-        markedBy: validMarkedBy,
+        isCompleted ? 1 : 0,
+        workoutType || null,
+        notes || null,
+        validMarkedBy,
         timestamp,
-      };
+      ]
+    );
 
-      res.json(workout);
-    });
-  });
+    debug(
+      `Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`
+    );
+
+    const workout = {
+      id,
+      userId,
+      week,
+      dayOfWeek,
+      date,
+      isCompleted,
+      workoutType: workoutType || null,
+      notes: notes || null,
+      markedBy: validMarkedBy,
+      timestamp,
+    };
+
+    res.json(workout);
+  } catch (err) {
+    console.error("Error upserting workout:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// DELETE workout day
-app.delete("/api/workouts/:id", (req, res) => {
-  const query = "DELETE FROM workout_days WHERE id = ?";
+app.delete("/api/workouts/:id", async (req, res) => {
+  try {
+    const result = await db.run("DELETE FROM workout_days WHERE id = ?", [
+      req.params.id,
+    ]);
 
-  db.run(query, [req.params.id], function (err) {
-    if (err) {
-      console.error("Error deleting workout:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
+    if (result.changes === 0) {
       res.status(404).json({ error: "Workout not found" });
       return;
     }
 
     debug(`Deleted workout ID: ${req.params.id}`);
     res.json({ message: "Workout deleted successfully" });
-  });
+  } catch (err) {
+    console.error("Error deleting workout:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET workout statistics for a user
-app.get("/api/workouts/stats/:userId", (req, res) => {
-  const query = `
-    SELECT 
-      COUNT(*) as total_workouts,
-      SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_workouts,
-      COUNT(DISTINCT week) as weeks_with_data,
-      MAX(week) as latest_week
-    FROM workout_days 
-    WHERE user_id = ?
-  `;
-
-  db.get(query, [req.params.userId], (err, row) => {
-    if (err) {
-      console.error("Error fetching workout stats:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/workouts/stats/:userId", async (req, res) => {
+  try {
+    const row = await db.get(
+      `SELECT
+        COUNT(*) as total_workouts,
+        SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_workouts,
+        COUNT(DISTINCT week) as weeks_with_data,
+        MAX(week) as latest_week
+      FROM workout_days
+      WHERE user_id = ?`,
+      [req.params.userId]
+    );
 
     const stats = {
       totalWorkouts: row.total_workouts || 0,
@@ -821,26 +834,22 @@ app.get("/api/workouts/stats/:userId", (req, res) => {
     };
 
     res.json(stats);
-  });
+  } catch (err) {
+    console.error("Error fetching workout stats:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== GOALS ROUTES ====================
 
-// GET all goals
-app.get("/api/goals", (req, res) => {
-  const query = `
-    SELECT g.*, u.name as user_name 
-    FROM goals g
-    JOIN users u ON g.user_id = u.id
-    ORDER BY g.created_date DESC
-  `;
-
-  db.all(query, [], (err, rows) => {
-    if (err) {
-      console.error("Error fetching all goals:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/goals", async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT g.*, u.name as user_name
+      FROM goals g
+      JOIN users u ON g.user_id = u.id
+      ORDER BY g.created_date DESC
+    `);
 
     const goals = rows.map((row) => ({
       id: row.id,
@@ -852,28 +861,25 @@ app.get("/api/goals", (req, res) => {
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
-      proofs: [], // Will be populated when proofs table is implemented
+      proofs: [],
     }));
 
     debug(`Fetched ${goals.length} goals`);
     res.json(goals);
-  });
+  } catch (err) {
+    console.error("Error fetching all goals:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET goals for a specific user
-app.get("/api/goals/user/:userId", (req, res) => {
-  const query = `
-    SELECT * FROM goals 
-    WHERE user_id = ?
-    ORDER BY created_date DESC
-  `;
-
-  db.all(query, [req.params.userId], (err, rows) => {
-    if (err) {
-      console.error("Error fetching user goals:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/goals/user/:userId", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT * FROM goals
+      WHERE user_id = ?
+      ORDER BY created_date DESC`,
+      [req.params.userId]
+    );
 
     const goals = rows.map((row) => ({
       id: row.id,
@@ -884,26 +890,24 @@ app.get("/api/goals/user/:userId", (req, res) => {
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
-      proofs: [], // Will be populated when proofs table is implemented
+      proofs: [],
     }));
 
     debug(
-      `Fetched ${goals.length} goals for user ${req.params.userId}`,
+      `Fetched ${goals.length} goals for user ${req.params.userId}`
     );
     res.json(goals);
-  });
+  } catch (err) {
+    console.error("Error fetching user goals:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET single goal by ID
-app.get("/api/goals/:id", (req, res) => {
-  const query = `SELECT * FROM goals WHERE id = ?`;
-
-  db.get(query, [req.params.id], (err, row) => {
-    if (err) {
-      console.error("Error fetching goal:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/goals/:id", async (req, res) => {
+  try {
+    const row = await db.get(`SELECT * FROM goals WHERE id = ?`, [
+      req.params.id,
+    ]);
 
     if (!row) {
       res.status(404).json({ error: "Goal not found" });
@@ -919,25 +923,21 @@ app.get("/api/goals/:id", (req, res) => {
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
-      proofs: [], // Will be populated when proofs table is implemented
+      proofs: [],
     };
 
     res.json(goal);
-  });
+  } catch (err) {
+    console.error("Error fetching goal:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// POST create new goal
-app.post("/api/goals", (req, res) => {
+app.post("/api/goals", async (req, res) => {
   const { userId, category, description, isDifficult } = req.body;
 
-  debug("Goal creation request:", {
-    userId,
-    category,
-    description,
-    isDifficult,
-  });
+  debug("Goal creation request:", { userId, category, description, isDifficult });
 
-  // Validate required fields
   if (!userId) {
     res.status(400).json({ error: "User ID is required" });
     return;
@@ -955,14 +955,8 @@ app.post("/api/goals", (req, res) => {
     return;
   }
 
-  // First, check if the user exists
-  const userCheckQuery = "SELECT id FROM users WHERE id = ?";
-  db.get(userCheckQuery, [userId], (err, userRow) => {
-    if (err) {
-      console.error("Error checking user existence:", err.message);
-      res.status(500).json({ error: "Database error checking user" });
-      return;
-    }
+  try {
+    const userRow = await db.get("SELECT id FROM users WHERE id = ?", [userId]);
 
     if (!userRow) {
       console.error("User not found:", userId);
@@ -971,178 +965,148 @@ app.post("/api/goals", (req, res) => {
     }
 
     const id = uuidv4();
-    const createdDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD format
+    const createdDate = new Date().toISOString().split("T")[0];
     const sanitizedDescription = sanitizeString(description);
 
-    const query = `
-      INSERT INTO goals (
+    await db.run(
+      `INSERT INTO goals (
         id, user_id, category, description, is_difficult,
         is_completed, completed_date, created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const params = [
-      id,
-      userId,
-      category,
-      sanitizedDescription,
-      isDifficult ? 1 : 0,
-      0, // is_completed starts as false
-      null, // completed_date starts as null
-      createdDate,
-    ];
-
-    db.run(query, params, function (err) {
-      if (err) {
-        if (err.message.includes("UNIQUE constraint failed")) {
-          res
-            .status(409)
-            .json({
-              error: `User already has a goal in the ${category} category`,
-            });
-        } else if (err.message.includes("FOREIGN KEY constraint failed")) {
-          res.status(400).json({ error: `Invalid user ID: ${userId}` });
-        } else {
-          console.error("Error creating goal:", err.message);
-          res.status(500).json({ error: err.message });
-        }
-        return;
-      }
-
-      debug(
-        `Created goal: ${sanitizedDescription} for user ${userId}`,
-      );
-
-      // Return the created goal
-      const goal = {
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
         id,
         userId,
         category,
-        description: sanitizedDescription,
-        isDifficult: isDifficult || false,
-        isCompleted: false,
-        completedDate: null,
+        sanitizedDescription,
+        isDifficult ? 1 : 0,
+        0,
+        null,
         createdDate,
-        proofs: [],
-      };
+      ]
+    );
 
-      res.status(201).json(goal);
-    });
-  });
+    debug(`Created goal: ${sanitizedDescription} for user ${userId}`);
+
+    const goal = {
+      id,
+      userId,
+      category,
+      description: sanitizedDescription,
+      isDifficult: isDifficult || false,
+      isCompleted: false,
+      completedDate: null,
+      createdDate,
+      proofs: [],
+    };
+
+    res.status(201).json(goal);
+  } catch (err) {
+    if (err.message.includes("UNIQUE constraint failed")) {
+      res.status(409).json({
+        error: `User already has a goal in the ${category} category`,
+      });
+    } else if (err.message.includes("FOREIGN KEY constraint failed")) {
+      res.status(400).json({ error: `Invalid user ID: ${userId}` });
+    } else {
+      console.error("Error creating goal:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  }
 });
 
-// PUT update goal
-app.put("/api/goals/:id", (req, res) => {
+app.put("/api/goals/:id", async (req, res) => {
   const { description, isDifficult, isCompleted } = req.body;
 
-  // Validate description
   const descriptionError = validateString(description, "Description", 3, 500);
   if (descriptionError) {
     res.status(400).json({ error: descriptionError });
     return;
   }
 
-  const sanitizedDescription = sanitizeString(description);
-  const completedDate = isCompleted
-    ? new Date().toISOString().split("T")[0]
-    : null;
+  try {
+    const sanitizedDescription = sanitizeString(description);
+    const completedDate = isCompleted
+      ? new Date().toISOString().split("T")[0]
+      : null;
 
-  const query = `
-    UPDATE goals SET 
-      description = ?, 
-      is_difficult = ?,
-      is_completed = ?,
-      completed_date = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `;
+    const result = await db.run(
+      `UPDATE goals SET
+        description = ?,
+        is_difficult = ?,
+        is_completed = ?,
+        completed_date = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`,
+      [
+        sanitizedDescription,
+        isDifficult ? 1 : 0,
+        isCompleted ? 1 : 0,
+        completedDate,
+        req.params.id,
+      ]
+    );
 
-  const params = [
-    sanitizedDescription,
-    isDifficult ? 1 : 0,
-    isCompleted ? 1 : 0,
-    completedDate,
-    req.params.id,
-  ];
-
-  db.run(query, params, function (err) {
-    if (err) {
-      console.error("Error updating goal:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
+    if (result.changes === 0) {
       res.status(404).json({ error: "Goal not found" });
       return;
     }
 
     debug(`Updated goal: ${req.params.id}`);
 
-    // Fetch and return the updated goal
-    const selectQuery = `SELECT * FROM goals WHERE id = ?`;
-    db.get(selectQuery, [req.params.id], (err, row) => {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
+    const row = await db.get(`SELECT * FROM goals WHERE id = ?`, [
+      req.params.id,
+    ]);
 
-      const goal = {
-        id: row.id,
-        userId: row.user_id,
-        category: row.category,
-        description: row.description,
-        isDifficult: Boolean(row.is_difficult),
-        isCompleted: Boolean(row.is_completed),
-        completedDate: row.completed_date,
-        createdDate: row.created_date,
-        proofs: [],
-      };
+    const goal = {
+      id: row.id,
+      userId: row.user_id,
+      category: row.category,
+      description: row.description,
+      isDifficult: Boolean(row.is_difficult),
+      isCompleted: Boolean(row.is_completed),
+      completedDate: row.completed_date,
+      createdDate: row.created_date,
+      proofs: [],
+    };
 
-      res.json(goal);
-    });
-  });
+    res.json(goal);
+  } catch (err) {
+    console.error("Error updating goal:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// DELETE goal
-app.delete("/api/goals/:id", (req, res) => {
-  const query = "DELETE FROM goals WHERE id = ?";
+app.delete("/api/goals/:id", async (req, res) => {
+  try {
+    const result = await db.run("DELETE FROM goals WHERE id = ?", [
+      req.params.id,
+    ]);
 
-  db.run(query, [req.params.id], function (err) {
-    if (err) {
-      console.error("Error deleting goal:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
+    if (result.changes === 0) {
       res.status(404).json({ error: "Goal not found" });
       return;
     }
 
     debug(`Deleted goal ID: ${req.params.id}`);
     res.json({ message: "Goal deleted successfully" });
-  });
+  } catch (err) {
+    console.error("Error deleting goal:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET goal statistics for a user
-app.get("/api/goals/stats/:userId", (req, res) => {
-  const query = `
-    SELECT 
-      COUNT(*) as total_goals,
-      SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_goals,
-      SUM(CASE WHEN is_difficult = 1 THEN 1 ELSE 0 END) as difficult_goals,
-      COUNT(DISTINCT category) as categories_covered
-    FROM goals 
-    WHERE user_id = ?
-  `;
-
-  db.get(query, [req.params.userId], (err, row) => {
-    if (err) {
-      console.error("Error fetching goal stats:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/goals/stats/:userId", async (req, res) => {
+  try {
+    const row = await db.get(
+      `SELECT
+        COUNT(*) as total_goals,
+        SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_goals,
+        SUM(CASE WHEN is_difficult = 1 THEN 1 ELSE 0 END) as difficult_goals,
+        COUNT(DISTINCT category) as categories_covered
+      FROM goals
+      WHERE user_id = ?`,
+      [req.params.userId]
+    );
 
     const stats = {
       totalGoals: row.total_goals || 0,
@@ -1156,7 +1120,10 @@ app.get("/api/goals/stats/:userId", (req, res) => {
     };
 
     res.json(stats);
-  });
+  } catch (err) {
+    console.error("Error fetching goal stats:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== WEEKLY PLANS ROUTES ====================
@@ -1179,48 +1146,46 @@ const serializeWeeklyPlan = (row) => {
   };
 };
 
-// GET all weekly plans
-app.get("/api/weekly-plans", (req, res) => {
-  const query = `SELECT * FROM weekly_plans ORDER BY week DESC, user_id`;
-  db.all(query, [], (err, rows) => {
-    if (err) {
-      console.error("Error fetching weekly plans:", err.message);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+app.get("/api/weekly-plans", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT * FROM weekly_plans ORDER BY week DESC, user_id`
+    );
     const plans = rows.map(serializeWeeklyPlan);
     debug(`Fetched ${plans.length} weekly plans`);
     res.json(plans);
-  });
+  } catch (err) {
+    console.error("Error fetching weekly plans:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET a weekly plan for (userId, week)
-app.get("/api/weekly-plans/:userId/:week", (req, res) => {
+app.get("/api/weekly-plans/:userId/:week", async (req, res) => {
   const userId = req.params.userId;
   const week = Number(req.params.week);
   if (!Number.isInteger(week) || week < 1) {
     res.status(400).json({ error: "week must be a positive integer" });
     return;
   }
-  db.get(
-    `SELECT * FROM weekly_plans WHERE user_id = ? AND week = ?`,
-    [userId, week],
-    (err, row) => {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      if (!row) {
-        res.status(404).json({ error: "Weekly plan not found" });
-        return;
-      }
-      res.json(serializeWeeklyPlan(row));
+
+  try {
+    const row = await db.get(
+      `SELECT * FROM weekly_plans WHERE user_id = ? AND week = ?`,
+      [userId, week]
+    );
+
+    if (!row) {
+      res.status(404).json({ error: "Weekly plan not found" });
+      return;
     }
-  );
+
+    res.json(serializeWeeklyPlan(row));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// POST upsert a weekly plan
-app.post("/api/weekly-plans", (req, res) => {
+app.post("/api/weekly-plans", async (req, res) => {
   const { userId, week, committedDays, createdBy, override } = req.body;
 
   if (!userId || typeof userId !== "string") {
@@ -1256,134 +1221,105 @@ app.post("/api/weekly-plans", (req, res) => {
     : "admin";
   const isAdminOverride = validCreatedBy === "admin" && override === true;
 
-  db.get(
-    `SELECT id, current_consistency_level, is_active FROM users WHERE id = ?`,
-    [userId],
-    (err, user) => {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      if (!user) {
-        res.status(404).json({ error: `User ${userId} not found` });
-        return;
-      }
-      if (!user.is_active) {
-        res
-          .status(403)
-          .json({ error: "User is eliminated — cannot submit a plan" });
-        return;
-      }
+  try {
+    const user = await db.get(
+      `SELECT id, current_consistency_level, is_active FROM users WHERE id = ?`,
+      [userId]
+    );
 
-      const required = requiredWorkoutsForLevel(user.current_consistency_level);
-      if (uniqueDays.length < required) {
-        res.status(400).json({
-          error: `Level ${user.current_consistency_level} users must commit to at least ${required} days`,
-        });
-        return;
-      }
-
-      const currentWeek = getCurrentWeekIST();
-      if (!isAdminOverride && currentWeek > 0 && weekNum < currentWeek) {
-        res
-          .status(400)
-          .json({ error: "Cannot submit a plan for a past week" });
-        return;
-      }
-
-      const upsert = () => {
-        db.get(
-          `SELECT id, committed_at FROM weekly_plans WHERE user_id = ? AND week = ?`,
-          [userId, weekNum],
-          (errExisting, existing) => {
-            if (errExisting) {
-              res.status(500).json({ error: errExisting.message });
-              return;
-            }
-            const id = existing?.id || uuidv4();
-            const committedAt =
-              existing?.committed_at || new Date().toISOString();
-
-            const upsertQuery = `
-              INSERT OR REPLACE INTO weekly_plans (
-                id, user_id, week, committed_days, committed_at, created_by, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            `;
-            const params = [
-              id,
-              userId,
-              weekNum,
-              JSON.stringify(uniqueDays),
-              committedAt,
-              validCreatedBy,
-            ];
-            db.run(upsertQuery, params, function (errRun) {
-              if (errRun) {
-                console.error(
-                  "Error upserting weekly plan:",
-                  errRun.message
-                );
-                res.status(500).json({ error: errRun.message });
-                return;
-              }
-              debug(
-                `Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
-              );
-              res.json({
-                id,
-                userId,
-                week: weekNum,
-                committedDays: uniqueDays,
-                committedAt,
-                createdBy: validCreatedBy,
-              });
-            });
-          }
-        );
-      };
-
-      // Lock check: only applies to the current week. Future weeks are
-      // always editable; past weeks were rejected above. Plans must be
-      // submitted by Sunday 23:59 IST of the prior week, so once we are
-      // already inside the target week the deadline has passed.
-      // Admin override (createdBy:"admin" + override:true) bypasses lock.
-      if (!isAdminOverride && weekNum === currentWeek) {
-        res.status(403).json({
-          error:
-            "Commitment window closed — plans for this week had to be set by Sunday 23:59 IST of the prior week",
-          lockReason: "deadline-passed",
-        });
-        return;
-      }
-      upsert();
+    if (!user) {
+      res.status(404).json({ error: `User ${userId} not found` });
+      return;
     }
-  );
+    if (!user.is_active) {
+      res
+        .status(403)
+        .json({ error: "User is eliminated — cannot submit a plan" });
+      return;
+    }
+
+    const required = requiredWorkoutsForLevel(user.current_consistency_level);
+    if (uniqueDays.length < required) {
+      res.status(400).json({
+        error: `Level ${user.current_consistency_level} users must commit to at least ${required} days`,
+      });
+      return;
+    }
+
+    const currentWeek = getCurrentWeekIST();
+    if (!isAdminOverride && currentWeek > 0 && weekNum < currentWeek) {
+      res
+        .status(400)
+        .json({ error: "Cannot submit a plan for a past week" });
+      return;
+    }
+
+    if (!isAdminOverride && weekNum === currentWeek) {
+      res.status(403).json({
+        error:
+          "Commitment window closed — plans for this week had to be set by Sunday 23:59 IST of the prior week",
+        lockReason: "deadline-passed",
+      });
+      return;
+    }
+
+    const existing = await db.get(
+      `SELECT id, committed_at FROM weekly_plans WHERE user_id = ? AND week = ?`,
+      [userId, weekNum]
+    );
+
+    const id = existing?.id || uuidv4();
+    const committedAt = existing?.committed_at || new Date().toISOString();
+
+    await db.run(
+      `INSERT OR REPLACE INTO weekly_plans (
+        id, user_id, week, committed_days, committed_at, created_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [id, userId, weekNum, JSON.stringify(uniqueDays), committedAt, validCreatedBy]
+    );
+
+    debug(
+      `Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
+    );
+
+    res.json({
+      id,
+      userId,
+      week: weekNum,
+      committedDays: uniqueDays,
+      committedAt,
+      createdBy: validCreatedBy,
+    });
+  } catch (err) {
+    console.error("Error upserting weekly plan:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// DELETE a weekly plan (admin cleanup / testing)
-app.delete("/api/weekly-plans/:userId/:week", (req, res) => {
+app.delete("/api/weekly-plans/:userId/:week", async (req, res) => {
   const userId = req.params.userId;
   const week = Number(req.params.week);
   if (!Number.isInteger(week) || week < 1) {
     res.status(400).json({ error: "week must be a positive integer" });
     return;
   }
-  db.run(
-    `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
-    [userId, week],
-    function (err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      if (this.changes === 0) {
-        res.status(404).json({ error: "Weekly plan not found" });
-        return;
-      }
-      debug(`Deleted weekly plan for user ${userId}, week ${week}`);
-      res.json({ message: "Weekly plan deleted" });
+
+  try {
+    const result = await db.run(
+      `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
+      [userId, week]
+    );
+
+    if (result.changes === 0) {
+      res.status(404).json({ error: "Weekly plan not found" });
+      return;
     }
-  );
+
+    debug(`Deleted weekly plan for user ${userId}, week ${week}`);
+    res.json({ message: "Weekly plan deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== HEALTH CHECK ====================
@@ -1392,7 +1328,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
     message: "FitBois 2.0 API is running",
-    database: "SQLite",
+    database: process.env.TURSO_DATABASE_URL ? "Turso" : "SQLite (local)",
     environment: isProduction ? "production" : "development",
     timestamp: new Date().toISOString(),
   });
@@ -1400,34 +1336,32 @@ app.get("/api/health", (req, res) => {
 
 // ==================== CATCH-ALL FOR REACT SPA ====================
 
-// SPA fallback: serve React index.html for any non-API route when build present.
-app.get("*", (req, res) => {
-  const indexPath = path.join(__dirname, "..", "build", "index.html");
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(404).json({ error: "Frontend build not found" });
-  }
-});
-
-// ==================== START SERVER ====================
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 FitBois 2.0 API Server running on port ${PORT}`);
-  console.log(`📁 Database: ${dbPath}`);
-  console.log(`🌍 Environment: ${isProduction ? "production" : "development"}`);
-  console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
-});
-
-// Graceful shutdown
-process.on("SIGINT", () => {
-  console.log("\n🛑 Shutting down server...");
-  db.close((err) => {
-    if (err) {
-      console.error("Error closing database:", err.message);
+if (isProduction && !isVercel) {
+  app.get("*", (req, res) => {
+    const buildPath = path.join(__dirname, "..", "build", "index.html");
+    if (fs.existsSync(buildPath)) {
+      res.sendFile(buildPath);
     } else {
-      console.log("✅ Database connection closed");
+      res.status(404).json({ error: "Frontend build not found" });
     }
+  });
+}
+
+// ==================== START SERVER (standalone mode only) ====================
+
+if (!isVercel) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 FitBois 2.0 API Server running on port ${PORT}`);
+    console.log(
+      `🌍 Environment: ${isProduction ? "production" : "development"}`
+    );
+    console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
+  });
+
+  process.on("SIGINT", () => {
+    console.log("\n🛑 Shutting down server...");
     process.exit(0);
   });
-});
+}
+
+module.exports = app;

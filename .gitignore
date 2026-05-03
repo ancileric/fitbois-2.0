@@ -42,3 +42,6 @@ coverage/
 *.db-wal
 *backup*.db
 backups/
+
+# Vercel
+.vercel/
