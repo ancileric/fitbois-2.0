@@ -1,5 +1,10 @@
-const { createClient } = require("@libsql/client");
 const path = require("path");
+
+// Use the HTTP-only client on Vercel (no native bindings needed).
+// Use the full client locally (supports file: URLs for local SQLite).
+const { createClient } = process.env.TURSO_DATABASE_URL
+  ? require("@libsql/client/web")
+  : require("@libsql/client");
 
 const localDbPath = path.join(__dirname, "database", "fitbois.db");
 
