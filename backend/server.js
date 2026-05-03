@@ -1343,39 +1343,19 @@ app.post("/api/weekly-plans", (req, res) => {
       };
 
       // Lock check: only applies to the current week. Future weeks are
-      // always editable; past weeks were rejected above.
+      // always editable; past weeks were rejected above. Plans must be
+      // submitted by Sunday 23:59 IST of the prior week, so once we are
+      // already inside the target week the deadline has passed.
       // Admin override (createdBy:"admin" + override:true) bypasses lock.
       if (!isAdminOverride && weekNum === currentWeek) {
-        if (currentISTDayOfWeek() > 1) {
-          res.status(403).json({
-            error:
-              "Commitment window closed — it is past Monday IST for this week",
-            lockReason: "monday-ended",
-          });
-          return;
-        }
-        db.get(
-          `SELECT 1 FROM workout_days WHERE user_id = ? AND week = ? AND is_completed = 1 LIMIT 1`,
-          [userId, weekNum],
-          (errWorkout, row) => {
-            if (errWorkout) {
-              res.status(500).json({ error: errWorkout.message });
-              return;
-            }
-            if (row) {
-              res.status(403).json({
-                error:
-                  "Commitment window closed — a workout has already been logged for this week",
-                lockReason: "workout-logged",
-              });
-              return;
-            }
-            upsert();
-          }
-        );
-      } else {
-        upsert();
+        res.status(403).json({
+          error:
+            "Commitment window closed — plans for this week had to be set by Sunday 23:59 IST of the prior week",
+          lockReason: "deadline-passed",
+        });
+        return;
       }
+      upsert();
     }
   );
 });

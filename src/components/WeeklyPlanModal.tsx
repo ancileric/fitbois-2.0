@@ -7,7 +7,7 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export type PlanLockReason =
   | "past-week"
-  | "monday-ended"
+  | "deadline-passed"
   | "workout-logged"
   | null;
 
@@ -75,8 +75,8 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
     switch (lockReason) {
       case "past-week":
         return "This week has already ended — plans can only be set for the current or future weeks.";
-      case "monday-ended":
-        return "Plans for the current week must be set by end of Monday (IST). Your plan is locked for this week.";
+      case "deadline-passed":
+        return "Plans for the current week had to be set by Sunday 23:59 IST of the prior week. Your plan is locked.";
       case "workout-logged":
         return "A workout has already been logged for this week, so the plan is locked.";
       default:

@@ -28,13 +28,6 @@ interface WorkoutProps {
   }) => Promise<WeeklyPlan | undefined> | Promise<WeeklyPlan>;
 }
 
-// Returns 1 (Monday) through 7 (Sunday) in IST — mirrors backend.
-const currentISTDayOfWeek = (): number => {
-  const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const jsDow = istNow.getUTCDay();
-  return jsDow === 0 ? 7 : jsDow;
-};
-
 const Workout: React.FC<WorkoutProps> = ({
   users,
   workoutDays,
@@ -256,19 +249,12 @@ const Workout: React.FC<WorkoutProps> = ({
   };
 
   // Determine if/why a plan is locked for this user + selectedWeek.
-  const getLockReason = (userId: string): PlanLockReason => {
+  // Plans must be submitted by Sunday 23:59 IST of the prior week, so
+  // once we are already inside the target week the deadline has passed.
+  const getLockReason = (_userId: string): PlanLockReason => {
     if (currentWeek > 0 && selectedWeek < currentWeek) return "past-week";
     if (selectedWeek > currentWeek) return null; // future week always editable
-    // selectedWeek === currentWeek
-    if (currentISTDayOfWeek() > 1) return "monday-ended";
-    const hasWorkout = workoutDays.some(
-      (w) =>
-        w.userId === userId &&
-        w.week === selectedWeek &&
-        w.isCompleted,
-    );
-    if (hasWorkout) return "workout-logged";
-    return null;
+    return "deadline-passed";
   };
 
   // For a committed day in a past week, has the user satisfied it?
