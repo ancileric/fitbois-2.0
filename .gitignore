@@ -18,9 +18,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE
+# IDE & AI tool configs
 .idea/
 .vscode/
+.agents/
+.claude/
+.cursor/
 *.swp
 *.swo
 
