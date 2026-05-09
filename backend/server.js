@@ -964,6 +964,19 @@ app.post("/api/goals", async (req, res) => {
       return;
     }
 
+    if (isDifficult) {
+      const existing = await db.get(
+        "SELECT id FROM goals WHERE user_id = ? AND is_difficult = 1",
+        [userId]
+      );
+      if (existing) {
+        res.status(400).json({
+          error: "User already has a difficult goal. Only 1 difficult goal is allowed per person.",
+        });
+        return;
+      }
+    }
+
     const id = uuidv4();
     const createdDate = new Date().toISOString().split("T")[0];
     const sanitizedDescription = sanitizeString(description);
@@ -1024,6 +1037,22 @@ app.put("/api/goals/:id", async (req, res) => {
   }
 
   try {
+    if (isDifficult) {
+      const currentGoal = await db.get("SELECT user_id, is_difficult FROM goals WHERE id = ?", [req.params.id]);
+      if (currentGoal && !currentGoal.is_difficult) {
+        const existing = await db.get(
+          "SELECT id FROM goals WHERE user_id = ? AND is_difficult = 1 AND id != ?",
+          [currentGoal.user_id, req.params.id]
+        );
+        if (existing) {
+          res.status(400).json({
+            error: "User already has a difficult goal. Only 1 difficult goal is allowed per person.",
+          });
+          return;
+        }
+      }
+    }
+
     const sanitizedDescription = sanitizeString(description);
     const completedDate = isCompleted
       ? new Date().toISOString().split("T")[0]

@@ -451,3 +451,32 @@ export const updateAllUsersConsistency = (
     };
   });
 };
+
+/**
+ * For the current week, determine which remaining days a user MUST work out
+ * because they have zero margin left (remaining workouts >= remaining days).
+ * Returns an empty set for past/future weeks or when the week is already complete.
+ */
+export const getMustWorkoutDays = (
+  userId: string,
+  workoutDays: WorkoutDay[],
+  level: number,
+  required: number,
+  completed: number,
+  todayDow: number, // 1=Mon … 7=Sun
+): Set<number> => {
+  const remaining = required - completed;
+  const daysLeft = 7 - todayDow + 1;
+
+  if (remaining <= 0 || remaining < daysLeft) return new Set();
+
+  const days = new Set<number>();
+  for (let d = todayDow; d <= 7; d++) {
+    const wd = workoutDays.find(
+      (w) => w.userId === userId && w.dayOfWeek === d && w.isCompleted,
+    );
+    const done = wd && (level >= 5 || wd.workoutType !== 'steps');
+    if (!done) days.add(d);
+  }
+  return days;
+};

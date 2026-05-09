@@ -7,6 +7,7 @@ import {
   calculateConsistencyUpdate,
   updateAllUsersConsistency,
   calculateStintMissedWeeks,
+  getMustWorkoutDays,
 } from './consistencyCalculator';
 import { User, WorkoutDay, getRequiredWorkouts } from '../types';
 
@@ -641,6 +642,143 @@ describe('Consistency Calculator Tests', () => {
 
       expect(weekStatuses.length).toBe(3);
       expect(weekStatuses.every(s => s.week <= 3)).toBe(true);
+    });
+  });
+
+  describe('getMustWorkoutDays — highlight remaining must-workout days', () => {
+    const mkWorkout = (
+      userId: string,
+      day: number,
+      type: string = 'workout'
+    ): WorkoutDay => ({
+      id: `${userId}-d${day}`,
+      userId,
+      week: 1,
+      dayOfWeek: day,
+      date: `2026-01-${19 + day}`,
+      isCompleted: true,
+      workoutType: type,
+      markedBy: 'user',
+      timestamp: new Date().toISOString(),
+    });
+
+    describe('Level 5 (requires 5 workouts)', () => {
+      test('Wednesday with 0 done → must work out Wed–Sun (5 days)', () => {
+        const days = getMustWorkoutDays('u1', [], 5, 5, 0, 3);
+        expect(days).toEqual(new Set([3, 4, 5, 6, 7]));
+      });
+
+      test('Wednesday with 2 done (Mon, Tue) → 3 remaining, 5 days left → no highlight (has margin)', () => {
+        const workouts = [mkWorkout('u1', 1), mkWorkout('u1', 2)];
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 2, 3);
+        expect(days.size).toBe(0);
+      });
+
+      test('Thursday with 1 done → 4 remaining, 4 days left → must work out Thu–Sun', () => {
+        const workouts = [mkWorkout('u1', 1)];
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 1, 4);
+        expect(days).toEqual(new Set([4, 5, 6, 7]));
+      });
+
+      test('Friday with 0 done → 5 remaining but only 3 days left → still highlights (impossible but shows urgency)', () => {
+        const days = getMustWorkoutDays('u1', [], 5, 5, 0, 5);
+        expect(days).toEqual(new Set([5, 6, 7]));
+      });
+
+      test('already completed days within range are excluded from the set', () => {
+        // It's Thursday, 0 completed so far, but Thu is already marked done in the workout data
+        const workouts = [mkWorkout('u1', 4)]; // Thu done
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 0, 4);
+        // 5 remaining, 4 days left → highlight; Thu is done so only Fri–Sun
+        expect(days).toEqual(new Set([5, 6, 7]));
+        expect(days.has(4)).toBe(false);
+      });
+
+      test('week already complete → empty set', () => {
+        const workouts = Array.from({ length: 5 }, (_, i) => mkWorkout('u1', i + 1));
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 5, 6);
+        expect(days.size).toBe(0);
+      });
+    });
+
+    describe('Level 4 (requires 4 workouts)', () => {
+      test('Wednesday with 0 done → 4 remaining, 5 days left → no highlight (has 1 day margin)', () => {
+        const days = getMustWorkoutDays('u1', [], 4, 4, 0, 3);
+        expect(days.size).toBe(0);
+      });
+
+      test('Thursday with 0 done → 4 remaining, 4 days left → must work out Thu–Sun', () => {
+        const days = getMustWorkoutDays('u1', [], 4, 4, 0, 4);
+        expect(days).toEqual(new Set([4, 5, 6, 7]));
+      });
+
+      test('Friday with 1 done → 3 remaining, 3 days left → must work out Fri–Sun', () => {
+        const workouts = [mkWorkout('u1', 2)];
+        const days = getMustWorkoutDays('u1', workouts, 4, 4, 1, 5);
+        expect(days).toEqual(new Set([5, 6, 7]));
+      });
+
+      test('steps day does NOT count as done at level 4', () => {
+        const workouts = [mkWorkout('u1', 4, 'steps')];
+        // Thu has a steps day but level 4 ignores steps → Thu is NOT done
+        const days = getMustWorkoutDays('u1', workouts, 4, 4, 0, 4);
+        expect(days).toEqual(new Set([4, 5, 6, 7]));
+      });
+    });
+
+    describe('Level 3 (requires 4 workouts)', () => {
+      test('Thursday with 0 done → 4 remaining, 4 days left → must work out Thu–Sun', () => {
+        const days = getMustWorkoutDays('u1', [], 3, 4, 0, 4);
+        expect(days).toEqual(new Set([4, 5, 6, 7]));
+      });
+
+      test('Wednesday with 1 done → 3 remaining, 5 days left → no highlight', () => {
+        const workouts = [mkWorkout('u1', 1)];
+        const days = getMustWorkoutDays('u1', workouts, 3, 4, 1, 3);
+        expect(days.size).toBe(0);
+      });
+
+      test('Saturday with 2 done → 2 remaining, 2 days left → must work out Sat–Sun', () => {
+        const workouts = [mkWorkout('u1', 1), mkWorkout('u1', 3)];
+        const days = getMustWorkoutDays('u1', workouts, 3, 4, 2, 6);
+        expect(days).toEqual(new Set([6, 7]));
+      });
+
+      test('steps day does NOT count as done at level 3', () => {
+        const workouts = [mkWorkout('u1', 6, 'steps')];
+        const days = getMustWorkoutDays('u1', workouts, 3, 4, 0, 6);
+        expect(days).toEqual(new Set([6, 7]));
+      });
+    });
+
+    describe('Level 5 — steps count as workouts', () => {
+      test('steps day DOES count as done at level 5', () => {
+        // It's Thursday, 0 done so far, but Thu has a steps day
+        const workouts = [mkWorkout('u1', 4, 'steps')];
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 0, 4);
+        // 5 remaining, 4 days left → highlight; Thu done via steps (counts at level 5) → Fri–Sun
+        expect(days).toEqual(new Set([5, 6, 7]));
+        expect(days.has(4)).toBe(false); // Thu excluded because steps counts at level 5
+      });
+    });
+
+    describe('Edge cases', () => {
+      test('Monday with 0 done (level 5) → 5 remaining, 7 days left → no highlight', () => {
+        const days = getMustWorkoutDays('u1', [], 5, 5, 0, 1);
+        expect(days.size).toBe(0);
+      });
+
+      test('Sunday with 4 done (level 5) → 1 remaining, 1 day left → must work out Sunday', () => {
+        const workouts = Array.from({ length: 4 }, (_, i) => mkWorkout('u1', i + 1));
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 4, 7);
+        expect(days).toEqual(new Set([7]));
+      });
+
+      test('different user workouts are ignored', () => {
+        const workouts = [mkWorkout('other-user', 3)];
+        const days = getMustWorkoutDays('u1', workouts, 5, 5, 0, 3);
+        expect(days).toEqual(new Set([3, 4, 5, 6, 7]));
+      });
     });
   });
 });

@@ -108,6 +108,15 @@ export const getWeekDates = (challengeStartDate: string = CHALLENGE_START_DATE, 
 };
 
 /**
+ * Get the current day of week in IST as 1–7 (Monday–Sunday).
+ */
+export const getCurrentDayOfWeek = (): number => {
+  const istNow = getCurrentISTDate();
+  const jsDow = istNow.getUTCDay(); // 0 = Sun … 6 = Sat
+  return jsDow === 0 ? 7 : jsDow;   // 1 = Mon … 7 = Sun
+};
+
+/**
  * Format a Date to "Apr 6" style label (uses UTC fields since dates are stored at IST midnight in UTC)
  */
 export const formatDayLabel = (date: Date): string => {

@@ -10,8 +10,8 @@ import {
   Target,
   Lock,
 } from "lucide-react";
-import { getCurrentWeek, getDaysUntilStart, getWeekDates, formatDayLabel } from "../utils/dateUtils";
-import { calculateAllWeekStatuses } from "../utils/consistencyCalculator";
+import { getCurrentWeek, getCurrentDayOfWeek, getDaysUntilStart, getWeekDates, formatDayLabel } from "../utils/dateUtils";
+import { calculateAllWeekStatuses, getMustWorkoutDays as calcMustWorkoutDays } from "../utils/consistencyCalculator";
 import WeeklyPlanModal, { PlanLockReason } from "./WeeklyPlanModal";
 
 interface WorkoutProps {
@@ -257,6 +257,20 @@ const Workout: React.FC<WorkoutProps> = ({
     return "deadline-passed";
   };
 
+  const todayDow = getCurrentDayOfWeek(); // 1=Mon … 7=Sun
+
+  const getMustWorkoutDays = (userId: string): Set<number> => {
+    if (selectedWeek !== currentWeek || currentWeek <= 0) return new Set();
+    const stats = getUserWeekStats(userId, selectedWeek);
+    if (stats.isComplete) return new Set();
+    const user = users.find((u) => u.id === userId);
+    const level = user?.currentConsistencyLevel ?? 5;
+    const weekWorkouts = workoutDays.filter(
+      (w) => w.userId === userId && w.week === selectedWeek,
+    );
+    return calcMustWorkoutDays(userId, weekWorkouts, level, stats.required, stats.completed, todayDow);
+  };
+
   // For a committed day in a past week, has the user satisfied it?
   const didCommitHit = (
     userId: string,
@@ -464,50 +478,61 @@ const Workout: React.FC<WorkoutProps> = ({
 
                   {/* Days Row */}
                   <div className="flex justify-between items-center">
-                    {daysOfWeek.map((day, dayIndex) => {
-                      const workoutDay = getWorkoutDay(
-                        user.id,
-                        selectedWeek,
-                        dayIndex + 1,
-                      );
-                      const isCompleted = workoutDay?.isCompleted || false;
-                      const isSteps = isCompleted && workoutDay?.workoutType === "steps";
-                      const plan = getPlanFor(user.id);
-                      const isCommitted = plan?.committedDays.includes(dayIndex + 1) || false;
+                    {(() => {
+                      const mustDays = getMustWorkoutDays(user.id);
+                      return daysOfWeek.map((day, dayIndex) => {
+                        const dow = dayIndex + 1;
+                        const workoutDay = getWorkoutDay(
+                          user.id,
+                          selectedWeek,
+                          dow,
+                        );
+                        const isCompleted = workoutDay?.isCompleted || false;
+                        const isSteps = isCompleted && workoutDay?.workoutType === "steps";
+                        const plan = getPlanFor(user.id);
+                        const isCommitted = plan?.committedDays.includes(dow) || false;
+                        const isMustWorkout = mustDays.has(dow);
 
-                      return (
-                        <div key={day} className="flex flex-col items-center">
-                          <span className="text-xs font-medium text-gray-500">
-                            {day.charAt(0)}
-                          </span>
-                          <span className="text-xs text-gray-400 mb-1">
-                            {formatDayLabel(weekDates[dayIndex]).split(' ')[1]}
-                          </span>
-                          <button
-                            onClick={() =>
-                              cycleWorkout(user, selectedWeek, dayIndex + 1)
-                            }
-                            className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
-                              isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
-                            } ${
-                              isSteps
-                                ? "bg-blue-500 text-white"
-                                : isCompleted
-                                  ? "bg-green-500 text-white"
-                                  : "bg-gray-200 text-gray-400"
-                            }`}
-                          >
-                            {isSteps ? (
-                              <Activity size={18} />
-                            ) : isCompleted ? (
-                              <CheckCircle size={18} />
-                            ) : (
-                              <XCircle size={18} />
-                            )}
-                          </button>
-                        </div>
-                      );
-                    })}
+                        return (
+                          <div key={day} className="flex flex-col items-center">
+                            <span className={`text-xs font-medium ${isMustWorkout ? "text-amber-600" : "text-gray-500"}`}>
+                              {day.charAt(0)}
+                            </span>
+                            <span className="text-xs text-gray-400 mb-1">
+                              {formatDayLabel(weekDates[dayIndex]).split(' ')[1]}
+                            </span>
+                            <button
+                              onClick={() =>
+                                cycleWorkout(user, selectedWeek, dow)
+                              }
+                              className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                                isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
+                              } ${
+                                isMustWorkout && !isCompleted
+                                  ? "ring-2 ring-amber-400 ring-offset-1"
+                                  : ""
+                              } ${
+                                isSteps
+                                  ? "bg-blue-500 text-white"
+                                  : isCompleted
+                                    ? "bg-green-500 text-white"
+                                    : isMustWorkout
+                                      ? "bg-amber-200 text-amber-700"
+                                      : "bg-gray-200 text-gray-400"
+                              }`}
+                            >
+                              {isSteps ? (
+                                <Activity size={18} />
+                              ) : isCompleted ? (
+                                <CheckCircle size={18} />
+                              ) : (
+                                <XCircle size={18} />
+                              )}
+                            </button>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               );
@@ -644,46 +669,57 @@ const Workout: React.FC<WorkoutProps> = ({
                         </span>
                       </td>
 
-                      {daysOfWeek.map((day, dayIndex) => {
-                        const workoutDay = getWorkoutDay(
-                          user.id,
-                          selectedWeek,
-                          dayIndex + 1,
-                        );
-                        const isCompleted = workoutDay?.isCompleted || false;
-                        const isSteps = isCompleted && workoutDay?.workoutType === "steps";
-                        const plan = getPlanFor(user.id);
-                        const isCommitted = plan?.committedDays.includes(dayIndex + 1) || false;
+                      {(() => {
+                        const mustDays = getMustWorkoutDays(user.id);
+                        return daysOfWeek.map((day, dayIndex) => {
+                          const dow = dayIndex + 1;
+                          const workoutDay = getWorkoutDay(
+                            user.id,
+                            selectedWeek,
+                            dow,
+                          );
+                          const isCompleted = workoutDay?.isCompleted || false;
+                          const isSteps = isCompleted && workoutDay?.workoutType === "steps";
+                          const plan = getPlanFor(user.id);
+                          const isCommitted = plan?.committedDays.includes(dow) || false;
+                          const isMustWorkout = mustDays.has(dow);
 
-                        return (
-                          <td key={day} className="py-4 px-3 text-center">
-                            <div className="flex justify-center">
-                              <button
-                                onClick={() =>
-                                  cycleWorkout(user, selectedWeek, dayIndex + 1)
-                                }
-                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                                  isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
-                                } ${
-                                  isSteps
-                                    ? "bg-blue-500 text-white hover:bg-blue-600"
-                                    : isCompleted
-                                      ? "bg-green-500 text-white hover:bg-green-600"
-                                      : "bg-gray-200 text-gray-400 hover:bg-gray-300"
-                                }`}
-                              >
-                                {isSteps ? (
-                                  <Activity size={16} />
-                                ) : isCompleted ? (
-                                  <CheckCircle size={16} />
-                                ) : (
-                                  <XCircle size={16} />
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                        );
-                      })}
+                          return (
+                            <td key={day} className={`py-4 px-3 text-center ${isMustWorkout ? "bg-amber-50" : ""}`}>
+                              <div className="flex justify-center">
+                                <button
+                                  onClick={() =>
+                                    cycleWorkout(user, selectedWeek, dow)
+                                  }
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                                    isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
+                                  } ${
+                                    isMustWorkout && !isCompleted
+                                      ? "ring-2 ring-amber-400 ring-offset-1"
+                                      : ""
+                                  } ${
+                                    isSteps
+                                      ? "bg-blue-500 text-white hover:bg-blue-600"
+                                      : isCompleted
+                                        ? "bg-green-500 text-white hover:bg-green-600"
+                                        : isMustWorkout
+                                          ? "bg-amber-200 text-amber-700 hover:bg-amber-300"
+                                          : "bg-gray-200 text-gray-400 hover:bg-gray-300"
+                                  }`}
+                                >
+                                  {isSteps ? (
+                                    <Activity size={16} />
+                                  ) : isCompleted ? (
+                                    <CheckCircle size={16} />
+                                  ) : (
+                                    <XCircle size={16} />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        });
+                      })()}
 
                       <td className="py-4 px-4 text-center">
                         <div className="flex items-center justify-center space-x-2">

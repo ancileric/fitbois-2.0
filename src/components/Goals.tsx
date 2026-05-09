@@ -61,10 +61,10 @@ const Goals: React.FC<GoalsProps> = ({
       const userGoals = goals.filter((g) => g.userId === user.id);
       const activeGoals = userGoals.filter((g) => !g.isCompleted);
       const completedGoals = userGoals.filter((g) => g.isCompleted);
-      const difficultGoals = activeGoals.filter((g) => g.isDifficult);
+      const difficultGoals = userGoals.filter((g) => g.isDifficult);
 
-      // Check which categories are covered
-      const coveredCategories = activeGoals.map((g) => g.category);
+      // Check which categories are covered (include completed goals)
+      const coveredCategories = userGoals.map((g) => g.category);
       const missingCategories = GOAL_CATEGORIES.filter(
         (c) => !coveredCategories.includes(c.id as GoalCategory),
       );
@@ -78,7 +78,8 @@ const Goals: React.FC<GoalsProps> = ({
         missingCategories,
         hasAllCategories: missingCategories.length === 0,
         needsDifficultGoal:
-          activeGoals.length > 0 && difficultGoals.length === 0,
+          userGoals.length > 0 && difficultGoals.length === 0,
+        hasMaxDifficultGoals: difficultGoals.length >= 1,
       };
     });
 
@@ -547,20 +548,35 @@ const Goals: React.FC<GoalsProps> = ({
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isDifficult"
-                  checked={newGoal.isDifficult}
-                  onChange={(e) =>
-                    setNewGoal({ ...newGoal, isDifficult: e.target.checked })
-                  }
-                  className="rounded"
-                />
-                <label htmlFor="isDifficult" className="text-sm text-gray-700">
-                  This is a difficult goal (a real stretch)
-                </label>
-              </div>
+              {(() => {
+                const selectedUserData = goalsByUser.find(
+                  (u) => u.user.id === selectedUserId,
+                );
+                const userAlreadyHasDifficult =
+                  selectedUserData?.hasMaxDifficultGoals ?? false;
+                return (
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="isDifficult"
+                      checked={newGoal.isDifficult}
+                      disabled={userAlreadyHasDifficult && !newGoal.isDifficult}
+                      onChange={(e) =>
+                        setNewGoal({ ...newGoal, isDifficult: e.target.checked })
+                      }
+                      className="rounded"
+                    />
+                    <label htmlFor="isDifficult" className="text-sm text-gray-700">
+                      This is a difficult goal (a real stretch)
+                    </label>
+                    {userAlreadyHasDifficult && !newGoal.isDifficult && (
+                      <span className="text-xs text-orange-600">
+                        (limit: 1 per person)
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="flex space-x-3 mt-6">
@@ -626,23 +642,44 @@ const Goals: React.FC<GoalsProps> = ({
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="editIsDifficult"
-                  checked={editGoalForm.isDifficult}
-                  onChange={(e) =>
-                    setEditGoalForm({
-                      ...editGoalForm,
-                      isDifficult: e.target.checked,
-                    })
-                  }
-                  className="rounded"
-                />
-                <label htmlFor="editIsDifficult" className="text-sm text-gray-700">
-                  This is a difficult goal (a real stretch)
-                </label>
-              </div>
+              {(() => {
+                const editUserData = goalsByUser.find(
+                  (u) => u.user.id === editingGoal.userId,
+                );
+                const otherDifficultGoals =
+                  editUserData?.difficultGoals.filter(
+                    (g) => g.id !== editingGoal.id,
+                  ) ?? [];
+                const cannotMarkDifficult = otherDifficultGoals.length >= 1;
+                return (
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="editIsDifficult"
+                      checked={editGoalForm.isDifficult}
+                      disabled={cannotMarkDifficult && !editGoalForm.isDifficult}
+                      onChange={(e) =>
+                        setEditGoalForm({
+                          ...editGoalForm,
+                          isDifficult: e.target.checked,
+                        })
+                      }
+                      className="rounded"
+                    />
+                    <label
+                      htmlFor="editIsDifficult"
+                      className="text-sm text-gray-700"
+                    >
+                      This is a difficult goal (a real stretch)
+                    </label>
+                    {cannotMarkDifficult && !editGoalForm.isDifficult && (
+                      <span className="text-xs text-orange-600">
+                        (limit: 1 per person)
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="flex space-x-3 mt-6">
