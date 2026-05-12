@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const bodyParser = require("body-parser");
 const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
@@ -25,8 +24,8 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from React build (standalone mode only, Vercel handles this itself)
 if (isProduction && !isVercel) {
@@ -44,7 +43,9 @@ let initPromise = null;
 async function runDatabaseInit() {
   console.log("🚀 Initializing database...");
 
-  await db.exec(`
+  // Single batched DDL statement — reduces cold-start latency by avoiding
+  // multiple sequential round-trips to the database.
+  const ddl = `
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -59,10 +60,7 @@ async function runDatabaseInit() {
       reactivated_at_week INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS goals (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -75,10 +73,7 @@ async function runDatabaseInit() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
       UNIQUE(user_id, category)
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS workout_days (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -92,10 +87,7 @@ async function runDatabaseInit() {
       timestamp TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
       UNIQUE(user_id, week, day_of_week)
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS proofs (
       id TEXT PRIMARY KEY,
       goal_id TEXT,
@@ -107,10 +99,7 @@ async function runDatabaseInit() {
       week INTEGER NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
       FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE SET NULL
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS weekly_updates (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -122,10 +111,7 @@ async function runDatabaseInit() {
       submitted_date TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
       UNIQUE(user_id, week, year)
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS weekly_plans (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -137,10 +123,7 @@ async function runDatabaseInit() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
       UNIQUE(user_id, week)
-    )
-  `);
-
-  await db.exec(`
+    );
     CREATE TABLE IF NOT EXISTS admin_settings (
       id INTEGER PRIMARY KEY,
       challenge_start_date TEXT NOT NULL,
@@ -148,24 +131,31 @@ async function runDatabaseInit() {
       current_week INTEGER NOT NULL DEFAULT 1,
       is_active BOOLEAN NOT NULL DEFAULT 1,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    );
+    CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id);
+    CREATE INDEX IF NOT EXISTS idx_workout_week ON workout_days (week);
+    CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week);
+    CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id);
+    CREATE INDEX IF NOT EXISTS idx_goals_category ON goals (category);
+    CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id);
+    CREATE INDEX IF NOT EXISTS idx_weekly_plans_week ON weekly_plans (week);
+  `;
 
-  const indexes = [
-    "CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id)",
-    "CREATE INDEX IF NOT EXISTS idx_workout_week ON workout_days (week)",
-    "CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week)",
-    "CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id)",
-    "CREATE INDEX IF NOT EXISTS idx_goals_category ON goals (category)",
-    "CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id)",
-    "CREATE INDEX IF NOT EXISTS idx_weekly_plans_week ON weekly_plans (week)",
-  ];
-
-  for (const sql of indexes) {
-    try {
-      await db.exec(sql);
-    } catch (err) {
-      console.error("Index creation error:", err.message);
+  // libsql/client supports executeMultiple for batched multi-statement SQL
+  if (typeof db.execMultiple === "function") {
+    await db.execMultiple(ddl);
+  } else {
+    // Fallback: split and execute sequentially
+    const statements = ddl
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      try {
+        await db.exec(stmt);
+      } catch (err) {
+        console.error("DDL error:", err.message);
+      }
     }
   }
 

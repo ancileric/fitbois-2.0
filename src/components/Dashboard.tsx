@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { User, Goal, WeeklyUpdate, Proof, WorkoutDay, WeeklyPlan, getRequiredWorkouts } from "../types";
+import { User, Goal, WorkoutDay, WeeklyPlan, getRequiredWorkouts } from "../types";
 import {
   getCurrentWeek,
   getChallengeProgress,
@@ -7,7 +7,7 @@ import {
   getWeekDates,
   formatISTDate,
 } from "../utils/dateUtils";
-import { calculateAllWeekStatuses, calculateStintMissedWeeks, calculateLevelHistory, LevelPoint } from "../utils/consistencyCalculator";
+import { simulateFullHistory, LevelPoint } from "../utils/consistencyCalculator";
 import LevelTimeline from "./LevelTimeline";
 import WeeklyRecap from "./WeeklyRecap";
 import GoalCategoryProgress from "./GoalCategoryProgress";
@@ -20,8 +20,6 @@ interface DashboardProps {
   currentUser: User;
   users: User[];
   goals: Goal[];
-  weeklyUpdates: WeeklyUpdate[];
-  proofs: Proof[];
   workoutDays: WorkoutDay[];
   weeklyPlans?: WeeklyPlan[];
 }
@@ -108,8 +106,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   currentUser,
   users,
   goals,
-  weeklyUpdates,
-  proofs,
   workoutDays,
   weeklyPlans = [],
 }) => {
@@ -149,12 +145,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         );
         const totalWorkouts = userWorkouts.length;
 
-        // Calculate workout completion rate using accurate per-week requirements
-        const weekStatuses = calculateAllWeekStatuses(
-          user,
-          workoutDays,
-          currentWeek,
-        );
+        // Single-pass simulation: gets week statuses, level history, stint missed weeks
+        const sim = simulateFullHistory(user, workoutDays, currentWeek);
+        const weekStatuses = sim.weekStatuses;
         const totalCompleted = weekStatuses.reduce(
           (sum, ws) => sum + ws.completedWorkouts,
           0,
@@ -166,7 +159,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         const completionRate =
           totalRequired > 0 ? totalCompleted / totalRequired : 1;
 
-        const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
+        const stintMissedWeeks = sim.stintMissedWeeks;
 
         // --- This-week metrics ---
         const requiredThisWeek = getRequiredWorkouts(user.currentConsistencyLevel);
@@ -444,11 +437,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     return { weeks, months };
   }, [selectedHeatmapUser, users, workoutDays, goals]);
 
-  // Compute level history per user
+  // Compute level history per user via single-pass simulation
   const levelHistories = useMemo(() => {
     const map = new Map<string, LevelPoint[]>();
     users.forEach(user => {
-      map.set(user.id, calculateLevelHistory(user, workoutDays, currentWeek));
+      const sim = simulateFullHistory(user, workoutDays, currentWeek);
+      map.set(user.id, sim.levelHistory);
     });
     return map;
   }, [users, workoutDays, currentWeek]);

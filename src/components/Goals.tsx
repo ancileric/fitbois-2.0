@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { User, Goal, GOAL_CATEGORIES, GoalCategory } from "../types";
 import { Target, AlertCircle, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
@@ -53,24 +53,23 @@ const Goals: React.FC<GoalsProps> = ({
     });
   };
 
-  // Group goals by user (active only, sorted alphabetically)
-  const goalsByUser = users
+  // Group goals by user (active only, sorted alphabetically) — memoized
+  const goalsByUser = useMemo(() => users
     .filter((u) => u.isActive)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((user) => {
-      const userGoals = goals.filter((g) => g.userId === user.id);
+    .map((u) => {
+      const userGoals = goals.filter((g) => g.userId === u.id);
       const activeGoals = userGoals.filter((g) => !g.isCompleted);
       const completedGoals = userGoals.filter((g) => g.isCompleted);
       const difficultGoals = userGoals.filter((g) => g.isDifficult);
 
-      // Check which categories are covered (include completed goals)
       const coveredCategories = userGoals.map((g) => g.category);
       const missingCategories = GOAL_CATEGORIES.filter(
         (c) => !coveredCategories.includes(c.id as GoalCategory),
       );
 
       return {
-        user,
+        user: u,
         activeGoals,
         completedGoals,
         difficultGoals,
@@ -81,7 +80,7 @@ const Goals: React.FC<GoalsProps> = ({
           userGoals.length > 0 && difficultGoals.length === 0,
         hasMaxDifficultGoals: difficultGoals.length >= 1,
       };
-    });
+    }), [users, goals]);
 
   const handleCompleteGoal = (goal: Goal) => {
     const updatedGoal = {

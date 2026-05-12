@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { User, WorkoutDay, WeeklyPlan, AdminSettings, getRequiredWorkouts } from "../types";
 import {
   CheckCircle,
@@ -54,19 +54,21 @@ const Workout: React.FC<WorkoutProps> = ({
   const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const weekDates = getWeekDates(adminSettings.challengeStartDate, selectedWeek);
 
-  // Get workout data for a specific user, week, and day
-  const getWorkoutDay = (
-    userId: string,
-    week: number,
-    dayOfWeek: number,
-  ): WorkoutDay | null => {
-    return (
-      workoutDays.find(
-        (w) =>
-          w.userId === userId && w.week === week && w.dayOfWeek === dayOfWeek,
-      ) || null
-    );
-  };
+  // O(1) indexed workout lookup
+  const workoutIndex = useMemo(() => {
+    const map = new Map<string, WorkoutDay>();
+    workoutDays.forEach((w) => {
+      map.set(`${w.userId}-${w.week}-${w.dayOfWeek}`, w);
+    });
+    return map;
+  }, [workoutDays]);
+
+  const getWorkoutDay = useCallback(
+    (userId: string, week: number, dayOfWeek: number): WorkoutDay | null => {
+      return workoutIndex.get(`${userId}-${week}-${dayOfWeek}`) || null;
+    },
+    [workoutIndex],
+  );
 
   // Cycle through: empty → workout → steps → empty
   // Only 1 steps day allowed per user per week; if slot taken, workout cycles to empty instead.
@@ -239,14 +241,21 @@ const Workout: React.FC<WorkoutProps> = ({
     });
   }, [users, workoutDays, weeks, currentWeek, userWeekStatusesMap]);
 
-  // Look up a user's plan for the selected week.
-  const getPlanFor = (userId: string): WeeklyPlan | null => {
-    return (
-      weeklyPlans.find(
-        (p) => p.userId === userId && p.week === selectedWeek,
-      ) || null
-    );
-  };
+  // O(1) indexed weekly plan lookup
+  const planIndex = useMemo(() => {
+    const map = new Map<string, WeeklyPlan>();
+    weeklyPlans.forEach((p) => {
+      map.set(`${p.userId}-${p.week}`, p);
+    });
+    return map;
+  }, [weeklyPlans]);
+
+  const getPlanFor = useCallback(
+    (userId: string): WeeklyPlan | null => {
+      return planIndex.get(`${userId}-${selectedWeek}`) || null;
+    },
+    [planIndex, selectedWeek],
+  );
 
   // Determine if/why a plan is locked for this user + selectedWeek.
   // Plans must be submitted by Sunday 23:59 IST of the prior week, so

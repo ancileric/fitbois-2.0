@@ -19,6 +19,136 @@ export interface ConsistencyUpdate {
 }
 
 /**
+ * Result of a single-pass simulation over all completed weeks.
+ * Eliminates redundant multi-pass computations.
+ */
+export interface FullSimulationResult {
+  weekStatuses: WeekStatus[];
+  levelHistory: LevelPoint[];
+  currentLevel: 3 | 4 | 5;
+  cleanWeeks: number;
+  missedWeeks: number;
+  consecutiveCleanWeeks: number;
+  stintMissedWeeks: number;
+}
+
+/**
+ * Single-pass simulation that computes ALL derived metrics at once.
+ * Replaces the previous pattern of calling calculateAllWeekStatuses,
+ * simulateProgression, calculateStintMissedWeeks, and calculateLevelHistory
+ * separately (each doing a full O(weeks) pass).
+ */
+export const simulateFullHistory = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  currentWeek: number
+): FullSimulationResult => {
+  const completedWeeks = currentWeek - 1;
+  const startingLevel = user.specialRules?.startingLevel || 5;
+  const reactivatedAtWeek = user.specialRules?.reactivatedAtWeek;
+
+  if (completedWeeks <= 0) {
+    const level = (startingLevel as 3 | 4 | 5);
+    return {
+      weekStatuses: [],
+      levelHistory: currentWeek > 0 ? [{ week: currentWeek, level, isClean: false }] : [],
+      currentLevel: level,
+      cleanWeeks: 0,
+      missedWeeks: 0,
+      consecutiveCleanWeeks: 0,
+      stintMissedWeeks: 0,
+    };
+  }
+
+  let simulatedLevel = reactivatedAtWeek ? 5 : startingLevel;
+  let consecutiveClean = 0;
+  let cleanWeeks = 0;
+  let missedWeeks = 0;
+  let maxStreak = 0;
+  let currentStreak = 0;
+  let stintMissedWeeks = 0;
+
+  const loopStart = reactivatedAtWeek ?? 1;
+  // For stint tracking when reactivatedAtWeek is set, we skip earlier weeks
+  // but still need to simulate level for weekStatuses/levelHistory from week 1
+  let stintSimLevel = reactivatedAtWeek ? 5 : startingLevel;
+  let stintConsecutiveClean = 0;
+
+  const weekStatuses: WeekStatus[] = [];
+  const levelHistory: LevelPoint[] = [];
+
+  for (let week = 1; week <= completedWeeks; week++) {
+    const required = getRequiredWorkouts(simulatedLevel);
+    const completed = countCompletedWorkouts(user.id, workoutDays, week, simulatedLevel);
+    const isClean = completed >= required;
+
+    weekStatuses.push({ week, isComplete: isClean, completedWorkouts: completed, requiredWorkouts: required });
+    levelHistory.push({ week, level: simulatedLevel, isClean });
+
+    // Metrics
+    if (isClean) {
+      cleanWeeks++;
+      currentStreak++;
+      maxStreak = Math.max(maxStreak, currentStreak);
+    } else {
+      missedWeeks++;
+      currentStreak = 0;
+    }
+
+    // Stint tracking (only from loopStart onwards)
+    if (week >= loopStart) {
+      if (isClean) {
+        stintConsecutiveClean++;
+        if (stintConsecutiveClean >= 3 && stintSimLevel > 3) {
+          stintMissedWeeks = 0;
+          stintSimLevel--;
+          stintConsecutiveClean = 0;
+        }
+      } else {
+        stintConsecutiveClean = 0;
+        if (stintSimLevel < 5) {
+          stintSimLevel = Math.min(stintSimLevel + 1, startingLevel);
+          if (stintSimLevel === 5) {
+            stintMissedWeeks = 0;
+          }
+        } else {
+          stintMissedWeeks++;
+        }
+      }
+    }
+
+    // Level progression (always from week 1 for accurate level tracking)
+    if (isClean) {
+      consecutiveClean++;
+      if (consecutiveClean >= 3 && simulatedLevel > 3) {
+        simulatedLevel--;
+        consecutiveClean = 0;
+      }
+    } else {
+      consecutiveClean = 0;
+      if (simulatedLevel < 5) {
+        simulatedLevel = Math.min(simulatedLevel + 1, startingLevel);
+      }
+    }
+  }
+
+  // Add current in-progress week to level history
+  if (currentWeek > 0) {
+    levelHistory.push({ week: currentWeek, level: simulatedLevel, isClean: false });
+  }
+
+  return {
+    weekStatuses,
+    levelHistory,
+    currentLevel: simulatedLevel as 3 | 4 | 5,
+    cleanWeeks,
+    missedWeeks,
+    consecutiveCleanWeeks: maxStreak,
+    stintMissedWeeks,
+  };
+};
+
+/**
  * Count completed workouts for a user in a given week.
  * When simulatedLevel < 5, steps days are excluded from the count.
  */
@@ -303,13 +433,26 @@ export const calculateBonusWeeks = (
   weeklyPlans: WeeklyPlan[],
   currentWeek: number
 ): number => {
+  const levelHistory = calculateLevelHistory(user, workoutDays, currentWeek);
+  return calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, levelHistory);
+};
+
+/**
+ * Internal: bonus weeks calculation using pre-computed level history (avoids recomputation).
+ */
+const calculateBonusWeeksFromHistory = (
+  user: User,
+  workoutDays: WorkoutDay[],
+  weeklyPlans: WeeklyPlan[],
+  currentWeek: number,
+  levelHistory: LevelPoint[]
+): number => {
   const completedWeeks = currentWeek - 1;
   if (completedWeeks <= 0) return 0;
 
   const userPlans = weeklyPlans.filter(p => p.userId === user.id);
   if (userPlans.length === 0) return 0;
 
-  const levelHistory = calculateLevelHistory(user, workoutDays, currentWeek);
   const levelByWeek = new Map<number, number>();
   levelHistory.forEach(pt => levelByWeek.set(pt.week, pt.level));
 
@@ -338,7 +481,8 @@ export const calculateBonusWeeks = (
 };
 
 /**
- * Calculate complete consistency update for a user
+ * Calculate complete consistency update for a user.
+ * Uses simulateFullHistory internally for a single-pass computation.
  */
 export const calculateConsistencyUpdate = (
   user: User,
@@ -347,27 +491,18 @@ export const calculateConsistencyUpdate = (
   completedGoals: number,
   weeklyPlans: WeeklyPlan[] = []
 ): ConsistencyUpdate => {
-  const { cleanWeeks, missedWeeks } = calculateConsistencyMetrics(
-    user,
-    workoutDays,
-    currentWeek
-  );
+  const sim = simulateFullHistory(user, workoutDays, currentWeek);
+  const bonusWeeks = calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
 
-  const newConsistencyLevel = simulateProgression(user, workoutDays, currentWeek);
-  const levelChanged = newConsistencyLevel !== user.currentConsistencyLevel;
-  const stintMissedWeeks = calculateStintMissedWeeks(user, workoutDays, currentWeek);
-  const bonusWeeks = calculateBonusWeeks(user, workoutDays, weeklyPlans, currentWeek);
-
-  // Points = completed goals (1 each) + clean weeks (1 each) + planning bonus (1 each)
-  const totalPoints = completedGoals + cleanWeeks + bonusWeeks;
+  const totalPoints = completedGoals + sim.cleanWeeks + bonusWeeks;
 
   return {
     userId: user.id,
-    cleanWeeks,
-    missedWeeks,
-    stintMissedWeeks,
-    newConsistencyLevel,
-    levelChanged,
+    cleanWeeks: sim.cleanWeeks,
+    missedWeeks: sim.missedWeeks,
+    stintMissedWeeks: sim.stintMissedWeeks,
+    newConsistencyLevel: sim.currentLevel,
+    levelChanged: sim.currentLevel !== user.currentConsistencyLevel,
     totalPoints,
     bonusWeeks
   };
@@ -423,7 +558,8 @@ export const calculateLevelHistory = (
 };
 
 /**
- * Update all users' consistency metrics
+ * Update all users' consistency metrics.
+ * Uses simulateFullHistory for efficient single-pass computation per user.
  */
 export const updateAllUsersConsistency = (
   users: User[],
@@ -436,17 +572,17 @@ export const updateAllUsersConsistency = (
     if (!user.isActive) return user;
 
     const userCompletedGoals = goals.filter(g => g.userId === user.id && g.isCompleted).length;
-    const update = calculateConsistencyUpdate(user, workoutDays, currentWeek, userCompletedGoals, weeklyPlans);
-
-    // Check for elimination using per-stint missed weeks
-    const eliminated = shouldBeEliminated(user, update.stintMissedWeeks);
+    const sim = simulateFullHistory(user, workoutDays, currentWeek);
+    const bonusWeeks = calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
+    const totalPoints = userCompletedGoals + sim.cleanWeeks + bonusWeeks;
+    const eliminated = shouldBeEliminated(user, sim.stintMissedWeeks);
 
     return {
       ...user,
-      cleanWeeks: update.cleanWeeks,
-      missedWeeks: update.missedWeeks,
-      currentConsistencyLevel: update.newConsistencyLevel,
-      totalPoints: update.totalPoints,
+      cleanWeeks: sim.cleanWeeks,
+      missedWeeks: sim.missedWeeks,
+      currentConsistencyLevel: sim.currentLevel,
+      totalPoints,
       isActive: !eliminated
     };
   });

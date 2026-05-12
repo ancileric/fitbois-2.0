@@ -35,6 +35,20 @@ const db = {
   async exec(sql) {
     await client.execute(sql);
   },
+
+  async execMultiple(sql) {
+    if (typeof client.executeMultiple === "function") {
+      await client.executeMultiple(sql);
+    } else {
+      const statements = sql
+        .split(";")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      for (const stmt of statements) {
+        await client.execute(stmt);
+      }
+    }
+  },
 };
 
 module.exports = db;

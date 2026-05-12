@@ -1,19 +1,18 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
 import {
   User,
   Goal,
-  WeeklyUpdate,
   WeeklyPlan,
-  Proof,
   WorkoutDay,
   AdminSettings,
 } from "./types";
 import Header from "./components/Header";
 import Workout from "./components/Workout";
-import Dashboard from "./components/Dashboard";
 import Goals from "./components/Goals";
-import Admin from "./components/Admin";
 import ErrorBoundary from "./components/ErrorBoundary";
+
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const Admin = lazy(() => import("./components/Admin"));
 import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
@@ -72,8 +71,6 @@ function AppContent() {
   const { showToast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([]);
-  const [proofs, setProofs] = useState<Proof[]>([]);
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
   const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>([]);
   const [adminSettings] = useState<AdminSettings>({
@@ -98,37 +95,42 @@ function AppContent() {
     localStorage.setItem("activeView", activeView);
   }, [activeView]);
 
+  const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const recalculateUserConsistency = useCallback(() => {
-    setUsers((currentUsers) => {
-      const currentWeek = getCurrentWeek();
-      const goalData = goals.map((g) => ({
-        userId: g.userId,
-        isCompleted: g.isCompleted,
-      }));
+    if (recalcTimerRef.current) clearTimeout(recalcTimerRef.current);
+    recalcTimerRef.current = setTimeout(() => {
+      setUsers((currentUsers) => {
+        const currentWeek = getCurrentWeek();
+        const goalData = goals.map((g) => ({
+          userId: g.userId,
+          isCompleted: g.isCompleted,
+        }));
 
-      const updatedUsers = updateAllUsersConsistency(
-        currentUsers,
-        workoutDays,
-        goalData,
-        currentWeek,
-        weeklyPlans,
-      );
+        const updatedUsers = updateAllUsersConsistency(
+          currentUsers,
+          workoutDays,
+          goalData,
+          currentWeek,
+          weeklyPlans,
+        );
 
-      if (!isOffline) {
-        updatedUsers
-          .filter((u) => {
-            const original = currentUsers.find((o) => o.id === u.id);
-            return original && !userConsistencyEqual(original, u);
-          })
-          .forEach((u) => {
-            apiService.updateUser(u.id, u).catch((error) => {
-              console.error("Error updating user in database:", error);
+        if (!isOffline) {
+          updatedUsers
+            .filter((u) => {
+              const original = currentUsers.find((o) => o.id === u.id);
+              return original && !userConsistencyEqual(original, u);
+            })
+            .forEach((u) => {
+              apiService.updateUser(u.id, u).catch((error) => {
+                console.error("Error updating user in database:", error);
+              });
             });
-          });
-      }
+        }
 
-      return updatedUsers;
-    });
+        return updatedUsers;
+      });
+    }, 300);
   }, [goals, workoutDays, weeklyPlans, isOffline]);
 
   const clearRetryTimer = useCallback(() => {
@@ -179,8 +181,6 @@ function AppContent() {
         }
         return recalculated[0] || null;
       });
-      setWeeklyUpdates([]);
-      setProofs([]);
 
       writeSnapshot({
         users: recalculated,
@@ -246,8 +246,6 @@ function AppContent() {
         setGoals(snap.goals);
         setWeeklyPlans(snap.weeklyPlans);
         setCurrentUser(snap.users[0] || null);
-        setWeeklyUpdates([]);
-        setProofs([]);
         setSnapshotSavedAt(snap.savedAt);
         setIsOffline(true);
         scheduleRetry();
@@ -424,20 +422,13 @@ function AppContent() {
     try {
       await apiService.deleteUser(userId);
 
-      setUsers((prevUsers: User[]) =>
-        prevUsers.filter((u: User) => u.id !== userId),
+      setUsers((prevUsers) => prevUsers.filter((u) => u.id !== userId));
+      setGoals((prevGoals) => prevGoals.filter((g) => g.userId !== userId));
+      setWorkoutDays((prevWorkouts) =>
+        prevWorkouts.filter((w) => w.userId !== userId),
       );
-      setGoals((prevGoals: Goal[]) =>
-        prevGoals.filter((g: Goal) => g.userId !== userId),
-      );
-      setWeeklyUpdates((prevUpdates: WeeklyUpdate[]) =>
-        prevUpdates.filter((w: WeeklyUpdate) => w.userId !== userId),
-      );
-      setProofs((prevProofs: Proof[]) =>
-        prevProofs.filter((p: Proof) => p.userId !== userId),
-      );
-      setWorkoutDays((prevWorkouts: WorkoutDay[]) =>
-        prevWorkouts.filter((w: WorkoutDay) => w.userId !== userId),
+      setWeeklyPlans((prevPlans) =>
+        prevPlans.filter((p) => p.userId !== userId),
       );
     } catch (error) {
       console.error("Error deleting user from database:", error);
@@ -514,29 +505,29 @@ function AppContent() {
             />
           )}
 
-          {activeView === "dashboard" && (
-            <Dashboard
-              currentUser={currentUser}
-              users={users}
-              goals={goals}
-              weeklyUpdates={weeklyUpdates}
-              proofs={proofs}
-              workoutDays={workoutDays}
-              weeklyPlans={weeklyPlans}
-            />
-          )}
+          <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>}>
+            {activeView === "dashboard" && (
+              <Dashboard
+                currentUser={currentUser}
+                users={users}
+                goals={goals}
+                workoutDays={workoutDays}
+                weeklyPlans={weeklyPlans}
+              />
+            )}
 
-          {activeView === "admin" && (
-            <Admin
-              users={users}
-              workoutDays={workoutDays}
-              adminSettings={adminSettings}
-              onUpdateUser={updateUser}
-              onDeleteUser={deleteUser}
-              onUpdateWorkoutDay={updateWorkoutDay}
-              onRecalculateConsistency={recalculateUserConsistency}
-            />
-          )}
+            {activeView === "admin" && (
+              <Admin
+                users={users}
+                workoutDays={workoutDays}
+                adminSettings={adminSettings}
+                onUpdateUser={updateUser}
+                onDeleteUser={deleteUser}
+                onUpdateWorkoutDay={updateWorkoutDay}
+                onRecalculateConsistency={recalculateUserConsistency}
+              />
+            )}
+          </Suspense>
         </ErrorBoundary>
       </main>
       <Toast />
