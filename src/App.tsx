@@ -7,8 +7,6 @@ import {
   AdminSettings,
 } from "./types";
 import Header from "./components/Header";
-import Workout from "./components/Workout";
-import Goals from "./components/Goals";
 import ErrorBoundary from "./components/ErrorBoundary";
 import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
@@ -17,6 +15,10 @@ import { apiService } from "./services/api";
 import { updateAllUsersConsistency } from "./utils/consistencyCalculator";
 import { getCurrentWeek } from "./utils/dateUtils";
 
+// All four view components are code-split so only the chunk for the active
+// view is downloaded on initial load.
+const Workout = lazy(() => import("./components/Workout"));
+const Goals = lazy(() => import("./components/Goals"));
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const Admin = lazy(() => import("./components/Admin"));
 
@@ -538,29 +540,35 @@ function AppContent() {
 
       <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
         <ErrorBoundary>
-          {activeView === "workout" && (
-            <Workout
-              users={users}
-              workoutDays={workoutDays}
-              weeklyPlans={weeklyPlans}
-              adminSettings={adminSettings}
-              onUpdateWorkoutDay={updateWorkoutDay}
-              onUpdateWeeklyPlan={updateWeeklyPlan}
-            />
-          )}
+          <Suspense
+            fallback={
+              <div className="flex justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+              </div>
+            }
+          >
+            {activeView === "workout" && (
+              <Workout
+                users={users}
+                workoutDays={workoutDays}
+                weeklyPlans={weeklyPlans}
+                adminSettings={adminSettings}
+                onUpdateWorkoutDay={updateWorkoutDay}
+                onUpdateWeeklyPlan={updateWeeklyPlan}
+              />
+            )}
 
-          {activeView === "goals" && (
-            <Goals
-              user={currentUser}
-              users={users}
-              goals={goals}
-              onAddGoal={addGoal}
-              onUpdateGoal={updateGoal}
-              onDeleteGoal={deleteGoal}
-            />
-          )}
+            {activeView === "goals" && (
+              <Goals
+                user={currentUser}
+                users={users}
+                goals={goals}
+                onAddGoal={addGoal}
+                onUpdateGoal={updateGoal}
+                onDeleteGoal={deleteGoal}
+              />
+            )}
 
-          <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>}>
             {activeView === "dashboard" && (
               <Dashboard
                 currentUser={currentUser}
