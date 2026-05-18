@@ -1,7 +1,10 @@
 import React from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
+type BannerMode = 'hydrating' | 'offline';
+
 interface OfflineBannerProps {
+  mode: BannerMode;
   savedAt: number | null;
   onRetry: () => void;
   isRetrying: boolean;
@@ -19,7 +22,25 @@ const formatAgo = (savedAt: number | null): string => {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 };
 
-const OfflineBanner: React.FC<OfflineBannerProps> = ({ savedAt, onRetry, isRetrying }) => {
+const OfflineBanner: React.FC<OfflineBannerProps> = ({
+  mode,
+  savedAt,
+  onRetry,
+  isRetrying,
+}) => {
+  // Soft "refreshing" state — snapshot is showing while a background refresh
+  // is still in flight. No retry button; this state is transient.
+  if (mode === 'hydrating') {
+    return (
+      <div className="sticky top-0 z-50 bg-blue-50 border-b border-blue-200">
+        <div className="container mx-auto px-4 py-2 flex items-center gap-2 text-sm text-blue-900">
+          <RefreshCw className="w-4 h-4 flex-shrink-0 animate-spin" />
+          <span>Refreshing latest data…</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sticky top-0 z-50 bg-amber-50 border-b border-amber-200">
       <div className="container mx-auto px-4 py-2 flex items-center justify-between gap-3">

@@ -10,15 +10,15 @@ import Header from "./components/Header";
 import Workout from "./components/Workout";
 import Goals from "./components/Goals";
 import ErrorBoundary from "./components/ErrorBoundary";
-
-const Dashboard = lazy(() => import("./components/Dashboard"));
-const Admin = lazy(() => import("./components/Admin"));
 import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
 import { apiService } from "./services/api";
 import { updateAllUsersConsistency } from "./utils/consistencyCalculator";
 import { getCurrentWeek } from "./utils/dateUtils";
+
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const Admin = lazy(() => import("./components/Admin"));
 
 type ActiveView = "workout" | "goals" | "dashboard" | "admin";
 
@@ -67,26 +67,49 @@ const userConsistencyEqual = (a: User, b: User): boolean =>
   a.totalPoints === b.totalPoints &&
   a.isActive === b.isActive;
 
+const HYDRATING_BANNER_DELAY_MS = 1500;
+
 function AppContent() {
   const { showToast } = useToast();
-  const [users, setUsers] = useState<User[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
-  const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>([]);
+
+  // Read the snapshot synchronously once so we can seed state from it on the
+  // very first render. This is what makes warm visits feel instant.
+  const initialSnapshot = useRef<Snapshot | null>(readSnapshot()).current;
+
+  const [users, setUsers] = useState<User[]>(initialSnapshot?.users ?? []);
+  const [goals, setGoals] = useState<Goal[]>(initialSnapshot?.goals ?? []);
+  const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>(
+    initialSnapshot?.workoutDays ?? []
+  );
+  const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>(
+    initialSnapshot?.weeklyPlans ?? []
+  );
   const [adminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
     challengeEndDate: "2026-07-31",
     currentWeek: 1,
     isActive: true,
   });
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(
+    initialSnapshot?.users[0] ?? null
+  );
   const [activeView, setActiveView] = useState<ActiveView>(
     () => (localStorage.getItem("activeView") as ActiveView) ?? "workout"
   );
   const [isOffline, setIsOffline] = useState(false);
-  const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(null);
+  const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(
+    initialSnapshot?.savedAt ?? null
+  );
   const [isRetrying, setIsRetrying] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+
+  // True while we're showing snapshot data but the background refresh has not
+  // yet completed. Drives mutation-blocking and the "Refreshing…" banner.
+  const [isHydrating, setIsHydrating] = useState<boolean>(
+    initialSnapshot !== null
+  );
+  // Delayed flag so we don't flash the refresh banner on fast networks.
+  const [showHydratingBanner, setShowHydratingBanner] = useState(false);
 
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAttemptRef = useRef(0);
@@ -142,9 +165,9 @@ function AppContent() {
 
   const loadData = useCallback(async (): Promise<boolean> => {
     try {
-      const isConnected = await apiService.testConnection();
-      if (!isConnected) throw new Error("API unreachable");
-
+      // Fire all four reads in parallel. A rejection on any required call
+      // surfaces as "API unreachable" via the catch below — no separate
+      // /api/health round-trip needed.
       const [dbUsers, dbWorkouts, dbGoals, dbPlans] = await Promise.all([
         apiService.getUsers(),
         apiService.getAllWorkouts(),
@@ -233,20 +256,33 @@ function AppContent() {
   useEffect(() => {
     let cancelled = false;
 
+    // If we seeded from a snapshot, only show the "Refreshing…" banner if the
+    // background refresh is still in flight after a short grace period. This
+    // keeps fast networks visually silent.
+    let bannerTimer: ReturnType<typeof setTimeout> | null = null;
+    if (initialSnapshot) {
+      bannerTimer = setTimeout(() => {
+        if (!cancelled) setShowHydratingBanner(true);
+      }, HYDRATING_BANNER_DELAY_MS);
+    }
+
     (async () => {
       const ok = await loadData();
       if (cancelled) return;
-      if (ok) return;
 
-      // API failed — hydrate from snapshot if available.
-      const snap = readSnapshot();
-      if (snap) {
-        setUsers(snap.users);
-        setWorkoutDays(snap.workoutDays);
-        setGoals(snap.goals);
-        setWeeklyPlans(snap.weeklyPlans);
-        setCurrentUser(snap.users[0] || null);
-        setSnapshotSavedAt(snap.savedAt);
+      if (bannerTimer) clearTimeout(bannerTimer);
+      setShowHydratingBanner(false);
+      setIsHydrating(false);
+
+      if (ok) {
+        // Fresh data is in place; snapshot has been rewritten inside loadData.
+        return;
+      }
+
+      // API failed. If we already seeded state from a snapshot during render,
+      // just flip into offline mode and start the retry backoff. Otherwise
+      // we have nothing to show — surface the hard-failure screen.
+      if (initialSnapshot) {
         setIsOffline(true);
         scheduleRetry();
       } else {
@@ -257,13 +293,20 @@ function AppContent() {
 
     return () => {
       cancelled = true;
+      if (bannerTimer) clearTimeout(bannerTimer);
       clearRetryTimer();
     };
-  }, [loadData, scheduleRetry, clearRetryTimer]);
+  }, [loadData, scheduleRetry, clearRetryTimer, initialSnapshot]);
 
   const blockIfOffline = (): boolean => {
     if (isOffline) {
       showToast("Offline — changes can't be saved yet.", "error");
+      return true;
+    }
+    // While the background refresh is still running we may be looking at
+    // stale snapshot data; writing against it could clobber the server copy.
+    if (isHydrating) {
+      showToast("Loading latest — try again in a moment.", "error");
       return true;
     }
     return false;
@@ -393,6 +436,10 @@ function AppContent() {
       showToast("Offline — changes can't be saved yet.", "error");
       throw new Error("Offline");
     }
+    if (isHydrating) {
+      showToast("Loading latest — try again in a moment.", "error");
+      throw new Error("Hydrating");
+    }
     try {
       const savedPlan = await apiService.saveWeeklyPlan(plan);
       setWeeklyPlans((prev) => {
@@ -472,13 +519,21 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {isOffline && (
+      {isOffline ? (
         <OfflineBanner
+          mode="offline"
           savedAt={snapshotSavedAt}
           onRetry={manualRetry}
           isRetrying={isRetrying}
         />
-      )}
+      ) : showHydratingBanner ? (
+        <OfflineBanner
+          mode="hydrating"
+          savedAt={snapshotSavedAt}
+          onRetry={manualRetry}
+          isRetrying={isRetrying}
+        />
+      ) : null}
       <Header activeView={activeView} onViewChange={setActiveView} />
 
       <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
