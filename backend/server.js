@@ -616,12 +616,24 @@ app.delete("/api/users/:id", async (req, res) => {
 
 app.get("/api/workouts", async (req, res) => {
   try {
-    const rows = await db.all(`
-      SELECT wd.*, u.name as user_name
-      FROM workout_days wd
-      JOIN users u ON wd.user_id = u.id
-      ORDER BY wd.week DESC, wd.day_of_week ASC
-    `);
+    // Optional ?since=YYYY-MM-DD lets the frontend ask for just recent rows
+    // on initial load. Default behavior (no param) returns the full history
+    // so existing callers stay backward compatible.
+    const since = typeof req.query.since === "string" ? req.query.since : null;
+    const sinceValid = since && /^\d{4}-\d{2}-\d{2}$/.test(since);
+
+    const sql = sinceValid
+      ? `SELECT wd.*, u.name as user_name
+         FROM workout_days wd
+         JOIN users u ON wd.user_id = u.id
+         WHERE wd.date >= ?
+         ORDER BY wd.week DESC, wd.day_of_week ASC`
+      : `SELECT wd.*, u.name as user_name
+         FROM workout_days wd
+         JOIN users u ON wd.user_id = u.id
+         ORDER BY wd.week DESC, wd.day_of_week ASC`;
+
+    const rows = await db.all(sql, sinceValid ? [since] : []);
 
     const workouts = rows.map((row) => ({
       id: row.id,
@@ -637,7 +649,9 @@ app.get("/api/workouts", async (req, res) => {
       timestamp: row.timestamp,
     }));
 
-    debug(`Fetched ${workouts.length} workout records`);
+    debug(
+      `Fetched ${workouts.length} workout records${sinceValid ? ` since ${since}` : ""}`
+    );
     res.json(workouts);
   } catch (err) {
     console.error("Error fetching all workouts:", err.message);

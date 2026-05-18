@@ -176,8 +176,11 @@ class ApiService {
 
   // ==================== WORKOUT METHODS ====================
 
-  async getAllWorkouts(): Promise<WorkoutDay[]> {
-    return this.fetchApi<WorkoutDay[]>('/workouts');
+  async getAllWorkouts(options?: { since?: string }): Promise<WorkoutDay[]> {
+    const qs = options?.since
+      ? `?since=${encodeURIComponent(options.since)}`
+      : '';
+    return this.fetchApi<WorkoutDay[]>(`/workouts${qs}`);
   }
 
   async getUserWorkouts(userId: string): Promise<WorkoutDay[]> {

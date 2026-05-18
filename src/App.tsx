@@ -170,9 +170,13 @@ function AppContent() {
       // Fire all four reads in parallel. A rejection on any required call
       // surfaces as "API unreachable" via the catch below — no separate
       // /api/health round-trip needed.
+      //
+      // Scope workouts to the current challenge cycle. The consistency
+      // calculator and every view only care about cohort-window data, so
+      // there's no need to ship rows from before the challenge started.
       const [dbUsers, dbWorkouts, dbGoals, dbPlans] = await Promise.all([
         apiService.getUsers(),
-        apiService.getAllWorkouts(),
+        apiService.getAllWorkouts({ since: adminSettings.challengeStartDate }),
         apiService.getAllGoals(),
         apiService.getWeeklyPlans().catch(() => [] as WeeklyPlan[]),
       ]);
@@ -230,7 +234,7 @@ function AppContent() {
       console.error("Error loading data from database:", error);
       return false;
     }
-  }, []);
+  }, [adminSettings.challengeStartDate]);
 
   const scheduleRetry = useCallback(() => {
     clearRetryTimer();
