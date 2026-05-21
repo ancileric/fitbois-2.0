@@ -174,11 +174,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         const needsMoreThisWeek = Math.max(0, requiredThisWeek - completedThisWeek);
         const cleanThisWeek = completedThisWeek >= requiredThisWeek ? 1 : 0;
 
-        // Plan-bonus for current week (all committed days already satisfied)
+        // Commit points for current week: +1 only when every committed day is
+        // already satisfied. The week is still in progress, so we don't apply -1
+        // until the week ends (handled by the historical calculation).
         const thisWeekPlan = weeklyPlans.find(
           (p) => p.userId === user.id && p.week === currentWeek,
         );
-        const bonusThisWeek =
+        const commitPointsThisWeek =
           thisWeekPlan &&
           Array.isArray(thisWeekPlan.committedDays) &&
           thisWeekPlan.committedDays.length > 0 &&
@@ -202,7 +204,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             currentWeekDateStrs.has(g.completedDate),
         ).length;
 
-        const pointsThisWeek = cleanThisWeek + bonusThisWeek + goalsThisWeek;
+        const pointsThisWeek =
+          cleanThisWeek + commitPointsThisWeek + 2 * goalsThisWeek;
 
         // --- Plan completion % (past weeks only) ---
         const pastPlans = weeklyPlans.filter(
