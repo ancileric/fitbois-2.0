@@ -15,7 +15,7 @@ A full-stack fitness challenge tracking app built for the FitBois 2.0 6-month fi
 
 - **Consistency levels:** Everyone starts at 5 workouts/week. Hit 3 consecutive clean weeks to drop to 4/week, then 3/week. Miss a week and you regress back up. Miss 2 weeks at the 5-day level and you're eliminated.
 - **Goals:** 5 goals at a time, one from each category (Cardio, Strength, Consistency, Sports, Personal Growth). At least one must be a real stretch goal.
-- **Scoring:** 1 point per completed goal + 1 point per clean week. Most points wins.
+- **Scoring:** **2 points** per completed goal + 1 point per clean week + **1 point** per committed week where every committed day is hit (**−1** if any committed day is missed). Most points wins.
 
 ## Tech Stack
 

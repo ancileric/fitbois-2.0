@@ -9,7 +9,7 @@ import {
   calculateStintMissedWeeks,
   getMustWorkoutDays,
 } from './consistencyCalculator';
-import { User, WorkoutDay, getRequiredWorkouts } from '../types';
+import { User, WorkoutDay, WeeklyPlan, getRequiredWorkouts } from '../types';
 
 describe('Consistency Calculator Tests', () => {
   // Helper to create a user
@@ -779,6 +779,152 @@ describe('Consistency Calculator Tests', () => {
         const days = getMustWorkoutDays('u1', workouts, 5, 5, 0, 3);
         expect(days).toEqual(new Set([3, 4, 5, 6, 7]));
       });
+    });
+  });
+
+  describe('Scoring formula: 2x goals + clean weeks +/- commit points', () => {
+    const createPlan = (
+      userId: string,
+      week: number,
+      committedDays: number[]
+    ): WeeklyPlan => ({
+      id: `${userId}-w${week}-plan`,
+      userId,
+      week,
+      committedDays,
+      committedAt: new Date().toISOString(),
+      createdBy: 'user',
+    });
+
+    test('each completed goal is worth 2 points', () => {
+      const user = createUser('u1', 5);
+      const workouts: WorkoutDay[] = [];
+
+      // currentWeek = 1 → no completed weeks, no clean weeks, no commits
+      const update = calculateConsistencyUpdate(user, workouts, 1, 3);
+
+      expect(update.cleanWeeks).toBe(0);
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(6); // 2 * 3 goals
+    });
+
+    test('clean weeks still count for 1 point each (no plans)', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5, 5, 5]); // 3 clean weeks
+
+      const update = calculateConsistencyUpdate(user, workouts, 4, 0);
+
+      expect(update.cleanWeeks).toBe(3);
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(3); // 0 goals + 3 clean weeks + 0 commit
+    });
+
+    test('successful commit adds +1 (all committed days hit)', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5]); // week 1 clean, days 1-5 done
+      const plans = [createPlan('u1', 1, [1, 2, 3])]; // committed Mon/Tue/Wed, all hit
+
+      const update = calculateConsistencyUpdate(user, workouts, 2, 0, plans);
+
+      expect(update.cleanWeeks).toBe(1);
+      expect(update.commitPointsSuccessful).toBe(1);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(2); // 0 goals + 1 clean + 1 commit
+    });
+
+    test('failed commit subtracts 1 (committed day missed)', () => {
+      const user = createUser('u1', 5);
+      // Week 1: only days 1, 2 completed. Plan committed Mon/Tue/Wed → Wed missed.
+      const workouts: WorkoutDay[] = [
+        {
+          id: 'u1-w1-d1',
+          userId: 'u1',
+          week: 1,
+          dayOfWeek: 1,
+          date: '2026-01-19',
+          isCompleted: true,
+          markedBy: 'user',
+          timestamp: new Date().toISOString(),
+        },
+        {
+          id: 'u1-w1-d2',
+          userId: 'u1',
+          week: 1,
+          dayOfWeek: 2,
+          date: '2026-01-20',
+          isCompleted: true,
+          markedBy: 'user',
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      const plans = [createPlan('u1', 1, [1, 2, 3])];
+
+      const update = calculateConsistencyUpdate(user, workouts, 2, 0, plans);
+
+      expect(update.cleanWeeks).toBe(0); // not a clean week
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(1);
+      expect(update.totalPoints).toBe(-1); // 0 goals + 0 clean + (-1) commit
+    });
+
+    test('no plan set yields 0 commit points (neither + nor -)', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5]);
+
+      const update = calculateConsistencyUpdate(user, workouts, 2, 0, []);
+
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(1); // just the clean week
+    });
+
+    test('mixed: 2 goals + 3 clean weeks + 1 successful + 1 failed commit', () => {
+      const user = createUser('u1', 5);
+      // Weeks 1-3 fully clean (5 workouts each)
+      // Week 1 plan (1,2,3) → all hit (success)
+      // Week 2 plan (4, 7) → 4 was hit (days 1-5), 7 (Sun) was NOT → fail
+      const workouts = createWorkouts('u1', [5, 5, 5]);
+      const plans = [
+        createPlan('u1', 1, [1, 2, 3]),
+        createPlan('u1', 2, [4, 7]),
+        // week 3: no plan → 0 commit points
+      ];
+
+      const update = calculateConsistencyUpdate(user, workouts, 4, 2, plans);
+
+      expect(update.cleanWeeks).toBe(3);
+      expect(update.commitPointsSuccessful).toBe(1);
+      expect(update.commitPointsFailed).toBe(1);
+      // 2 * 2 goals + 3 clean + (1 - 1) = 4 + 3 + 0 = 7
+      expect(update.totalPoints).toBe(7);
+    });
+
+    test('empty committedDays array does not count as a commit (no point change)', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5]);
+      const plans = [createPlan('u1', 1, [])]; // empty plan
+
+      const update = calculateConsistencyUpdate(user, workouts, 2, 0, plans);
+
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(1); // just the clean week
+    });
+
+    test('current in-progress week plan does not count toward commit points', () => {
+      const user = createUser('u1', 5);
+      const workouts = createWorkouts('u1', [5]); // only week 1 has workouts
+      // Plan for week 2 (current in-progress week) — none of its committed days
+      // are completed yet, but it should NOT be counted as a failed commit.
+      const plans = [createPlan('u1', 2, [1, 2, 3])];
+
+      const update = calculateConsistencyUpdate(user, workouts, 2, 0, plans);
+
+      expect(update.commitPointsSuccessful).toBe(0);
+      expect(update.commitPointsFailed).toBe(0);
+      expect(update.totalPoints).toBe(1); // just week 1's clean point
     });
   });
 });

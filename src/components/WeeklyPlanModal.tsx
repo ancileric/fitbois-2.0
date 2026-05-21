@@ -118,11 +118,10 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
 
         {!isLocked && (
           <p className="text-sm text-gray-600 mb-4 mt-3">
-            Pick the days you'll hit. Follow through on all of them and earn a{" "}
-            <span className="font-semibold text-primary-600">
-              +1 bonus point
-            </span>{" "}
-            on top of the usual clean-week point.
+            Pick the days you'll hit. Hit every committed day to earn{" "}
+            <span className="font-semibold text-primary-600">+1 point</span>{" "}
+            for the week. Miss any of them and you{" "}
+            <span className="font-semibold text-red-600">lose 1 point</span>.
           </p>
         )}
 

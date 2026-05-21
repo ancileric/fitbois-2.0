@@ -15,7 +15,13 @@ export interface ConsistencyUpdate {
   newConsistencyLevel: 3 | 4 | 5;
   levelChanged: boolean;
   totalPoints: number;
-  bonusWeeks: number;
+  commitPointsSuccessful: number;
+  commitPointsFailed: number;
+}
+
+export interface CommitPoints {
+  successful: number;
+  failed: number;
 }
 
 /**
@@ -422,41 +428,45 @@ export const shouldBeEliminated = (
 };
 
 /**
- * Count "planning bonus" weeks — completed weeks in which the user had a plan and
- * satisfied every committed day. A committed day is satisfied by a completed
- * workout_days row for that day_of_week. For Levels 3 & 4, a "steps" workout does
- * NOT satisfy a commitment (mirrors the level-aware steps rule for clean weeks).
+ * Calculate "commit points" — for each completed week with a non-empty Weekly Plan:
+ *   +1 if every committed day was satisfied
+ *   -1 if any committed day was missed
+ *    0 if no plan was set
+ * A committed day is satisfied by a completed workout_days row for that day_of_week.
+ * For Levels 3 & 4, a "steps" workout does NOT satisfy a commitment (mirrors the
+ * level-aware steps rule for clean weeks).
  */
-export const calculateBonusWeeks = (
+export const calculateCommitPoints = (
   user: User,
   workoutDays: WorkoutDay[],
   weeklyPlans: WeeklyPlan[],
   currentWeek: number
-): number => {
+): CommitPoints => {
   const levelHistory = calculateLevelHistory(user, workoutDays, currentWeek);
-  return calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, levelHistory);
+  return calculateCommitPointsFromHistory(user, workoutDays, weeklyPlans, currentWeek, levelHistory);
 };
 
 /**
- * Internal: bonus weeks calculation using pre-computed level history (avoids recomputation).
+ * Internal: commit points calculation using pre-computed level history (avoids recomputation).
  */
-const calculateBonusWeeksFromHistory = (
+const calculateCommitPointsFromHistory = (
   user: User,
   workoutDays: WorkoutDay[],
   weeklyPlans: WeeklyPlan[],
   currentWeek: number,
   levelHistory: LevelPoint[]
-): number => {
+): CommitPoints => {
   const completedWeeks = currentWeek - 1;
-  if (completedWeeks <= 0) return 0;
+  if (completedWeeks <= 0) return { successful: 0, failed: 0 };
 
   const userPlans = weeklyPlans.filter(p => p.userId === user.id);
-  if (userPlans.length === 0) return 0;
+  if (userPlans.length === 0) return { successful: 0, failed: 0 };
 
   const levelByWeek = new Map<number, number>();
   levelHistory.forEach(pt => levelByWeek.set(pt.week, pt.level));
 
-  let bonus = 0;
+  let successful = 0;
+  let failed = 0;
   for (const plan of userPlans) {
     if (plan.week < 1 || plan.week > completedWeeks) continue;
     if (!Array.isArray(plan.committedDays) || plan.committedDays.length === 0) continue;
@@ -474,10 +484,11 @@ const calculateBonusWeeksFromHistory = (
       )
     );
 
-    if (satisfiedAll) bonus++;
+    if (satisfiedAll) successful++;
+    else failed++;
   }
 
-  return bonus;
+  return { successful, failed };
 };
 
 /**
@@ -492,9 +503,10 @@ export const calculateConsistencyUpdate = (
   weeklyPlans: WeeklyPlan[] = []
 ): ConsistencyUpdate => {
   const sim = simulateFullHistory(user, workoutDays, currentWeek);
-  const bonusWeeks = calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
+  const commitPts = calculateCommitPointsFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
 
-  const totalPoints = completedGoals + sim.cleanWeeks + bonusWeeks;
+  const totalPoints =
+    2 * completedGoals + sim.cleanWeeks + (commitPts.successful - commitPts.failed);
 
   return {
     userId: user.id,
@@ -504,7 +516,8 @@ export const calculateConsistencyUpdate = (
     newConsistencyLevel: sim.currentLevel,
     levelChanged: sim.currentLevel !== user.currentConsistencyLevel,
     totalPoints,
-    bonusWeeks
+    commitPointsSuccessful: commitPts.successful,
+    commitPointsFailed: commitPts.failed,
   };
 };
 
@@ -573,8 +586,9 @@ export const updateAllUsersConsistency = (
 
     const userCompletedGoals = goals.filter(g => g.userId === user.id && g.isCompleted).length;
     const sim = simulateFullHistory(user, workoutDays, currentWeek);
-    const bonusWeeks = calculateBonusWeeksFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
-    const totalPoints = userCompletedGoals + sim.cleanWeeks + bonusWeeks;
+    const commitPts = calculateCommitPointsFromHistory(user, workoutDays, weeklyPlans, currentWeek, sim.levelHistory);
+    const totalPoints =
+      2 * userCompletedGoals + sim.cleanWeeks + (commitPts.successful - commitPts.failed);
     const eliminated = shouldBeEliminated(user, sim.stintMissedWeeks);
 
     return {
