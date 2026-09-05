@@ -2,8 +2,11 @@ import {
   runSeason,
   skipTokenBlocker,
   goalSplitError,
+  goalProgressFraction,
   FINE_BY_LEVEL,
   WORKOUTS_PER_WEEK,
+  MAX_SKIP_TOKENS,
+  SEASON_WEEKS,
 } from './seasonEngine';
 import { WorkoutDay } from '../types';
 
@@ -172,6 +175,39 @@ describe('skip tokens', () => {
     expect(s.weeks[0].outcome).toBe('clean');
   });
 
+  test('exactly 3 tokens are all honoured', () => {
+    const s = season([0, 0, 0], { skipWeeks: [1, 2, 3] });
+    expect(s.tokensUsed).toBe(3);
+    expect(s.billed).toBe(0);
+    expect(s.weeks.map((w) => w.outcome)).toEqual(['skipped', 'skipped', 'skipped']);
+  });
+
+  test('a 4th token week is fined like any other miss', () => {
+    const s = season([0, 0, 0, 0], { skipWeeks: [1, 2, 3, 4] });
+    expect(s.tokensUsed).toBe(3);
+    expect(s.missedWeeks).toBe(1);
+    expect(s.billed).toBe(500);
+    expect(s.weeks[3].outcome).toBe('missed');
+  });
+
+  test('the cap holds however many weeks were approved', () => {
+    const weeks = Array.from({ length: 24 }, (_, i) => i + 1);
+    const s = season(Array(24).fill(0), { skipWeeks: weeks, settledWeeks: weeks });
+    expect(s.tokensUsed).toBe(MAX_SKIP_TOKENS);
+  });
+
+  test('the first three approved weeks are the ones honoured, in week order', () => {
+    const s = season([0, 0, 0, 0], { skipWeeks: [4, 3, 2, 1] });
+    expect(s.weeks[3].outcome).toBe('missed');
+    expect(s.weeks[0].outcome).toBe('skipped');
+  });
+
+  test('a week outside the season is rejected as such, not as a late week', () => {
+    expect(skipTokenBlocker(99, SEASON_WEEKS, [])).toMatch(/isn't in the season/);
+    expect(skipTokenBlocker(0, SEASON_WEEKS, [])).toMatch(/isn't in the season/);
+    expect(skipTokenBlocker(SEASON_WEEKS, SEASON_WEEKS, [])).toMatch(/final two weeks/);
+  });
+
   test('three a season, never three in a row, not in the last two weeks', () => {
     expect(skipTokenBlocker(5, 24, [])).toBeNull();
     expect(skipTokenBlocker(5, 24, [1, 2, 3])).toMatch(/All 3/);
@@ -199,5 +235,31 @@ describe('goal points (Rule 02)', () => {
 
   test('a goal outside 1-3 points is rejected', () => {
     expect(goalSplitError([6])).toMatch(/1, 2 or 3/);
+  });
+});
+
+describe('goal progress (Rule 11: completed AT TARGET)', () => {
+  test('a lift completes only when the reading reaches the target', () => {
+    expect(goalProgressFraction(70, 100, 85)).toBeCloseTo(0.5);
+    expect(goalProgressFraction(70, 100, 99)).not.toBe(1);
+    expect(goalProgressFraction(70, 100, 100)).toBe(1);
+    expect(goalProgressFraction(70, 100, 120)).toBe(1);
+  });
+
+  test('a goal that counts down completes the same way', () => {
+    expect(goalProgressFraction(150, 120, 135)).toBeCloseTo(0.5);
+    expect(goalProgressFraction(150, 120, 121)).not.toBe(1);
+    expect(goalProgressFraction(150, 120, 120)).toBe(1);
+    expect(goalProgressFraction(150, 120, 110)).toBe(1);
+  });
+
+  test('going backwards floors at 0, never negative', () => {
+    expect(goalProgressFraction(70, 100, 50)).toBe(0);
+  });
+
+  test('a goal with no numbers has no fraction, so no reading can complete it', () => {
+    expect(goalProgressFraction(null, 100, 90)).toBeNull();
+    expect(goalProgressFraction(70, null, 90)).toBeNull();
+    expect(goalProgressFraction(70, 100, undefined)).toBeNull();
   });
 });

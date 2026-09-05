@@ -5,7 +5,7 @@ import { useTheme } from "../utils/theme";
 
 interface HeaderProps {
   activeView: string;
-  onViewChange: (view: "me" | "group" | "admin") => void;
+  onViewChange: (view: "me" | "group" | "rules" | "admin") => void;
   users: User[];
   currentUser: User | null;
   onChangePlayer: (id: string) => void;
@@ -29,6 +29,7 @@ const Header: React.FC<HeaderProps> = ({
   const navItems = [
     { id: "me", label: "Me" },
     { id: "group", label: "Group" },
+    { id: "rules", label: "Rules" },
   ] as const;
 
   return (

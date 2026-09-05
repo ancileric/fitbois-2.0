@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { IndianRupee, LucideIcon, Ticket, Target, TrendingUp, Wallet } from "lucide-react";
+import { apiFetch } from "../services/http";
 
 /**
  * What has happened in the season, newest first.
@@ -8,7 +9,6 @@ import { IndianRupee, LucideIcon, Ticket, Target, TrendingUp, Wallet } from "luc
  * tokens, goals — so the feed can't claim something the data doesn't support.
  */
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 type Kind = "fine" | "payment" | "token" | "goal" | "progress";
 
@@ -61,7 +61,7 @@ const Feed: React.FC<{ currentUserId?: string }> = ({ currentUserId }) => {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/feed?limit=30`);
+      const res = await apiFetch(`/feed?limit=30`);
       if (res.ok) setEvents(await res.json());
     } finally {
       setLoading(false);

@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Check, Gavel, Lock, Plus, TrendingUp, Trash2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Gavel, Lock, Plus, Stamp, TrendingUp, Trash2 } from "lucide-react";
 import { Goal, GOAL_BUDGET, GOAL_TIERS, User } from "../types";
-import { goalEligibilityError } from "../utils/seasonEngine";
+import { goalEligibilityError, goalProgressFraction } from "../utils/seasonEngine";
+import { apiFetch, latestGoalReadings } from "../services/http";
 
 /**
  * Rule 02: every player spends exactly 6 points across 2 to 6 goals.
@@ -19,6 +20,17 @@ interface GoalBoardProps {
   onAddGoal: (goal: Goal) => void;
   onUpdateGoal: (goal: Goal) => void;
   onDeleteGoal: (goalId: string) => void;
+}
+
+/** Rule 04: what the group has been asked to replace, as the server records it. */
+interface Petition {
+  id: string;
+  goalId: string;
+  raisedBy: string;
+  raisedByName: string;
+  reason: string | null;
+  status: string;
+  raisedAt: string;
 }
 
 /** Heaviest goal reads heaviest. The tier is legible from the chip alone. */
@@ -40,53 +52,98 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
   // Players arrive asynchronously, so the choice falls back until one is picked
   // rather than freezing an empty id on first render.
   const [pickedUserId, setPickedUserId] = useState("");
-  const [draft, setDraft] = useState({ category: "", description: "", target: "", points: 3 as 1 | 2 | 3 });
-  const [petitioned, setPetitioned] = useState<string[]>([]);
+  const [draft, setDraft] = useState({
+    category: "",
+    description: "",
+    from: "",
+    to: "",
+    unit: "",
+    points: 3 as 1 | 2 | 3,
+  });
+  const [petitions, setPetitions] = useState<Petition[]>([]);
+  /**
+   * Sign-offs made in this session. The goals themselves are App's to own and
+   * it only reloads them on a refresh, so a just-approved goal reads as live
+   * straight away rather than waiting a page load to catch up.
+   */
+  const [signedOff, setSignedOff] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [logging, setLogging] = useState<string | null>(null);
   const [reading, setReading] = useState("");
   const [latest, setLatest] = useState<Record<string, number>>({});
 
-  const API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+  // Petitions live on the server, so every player sees the same ones — the
+  // point of raising one is that the rest of the group learns about it.
+  const loadPetitions = useCallback(async () => {
+    const res = await apiFetch("/goals/petitions");
+    if (res.ok) setPetitions(await res.json());
+  }, []);
+
+  useEffect(() => {
+    loadPetitions().catch(() => {});
+  }, [loadPetitions, goals]);
 
   // The newest reading for each goal, so a bar can show where the player is.
   useEffect(() => {
     let cancelled = false;
-    Promise.all(
-      goals
-        .filter((g) => g.baselineValue != null && g.targetValue != null)
-        .map(async (g) => {
-          const res = await fetch(`${API}/goals/${g.id}/progress`);
-          if (!res.ok) return null;
-          const rows = await res.json();
-          return rows.length ? ([g.id, rows[rows.length - 1].value] as const) : null;
-        })
-    )
-      .then((pairs) => {
-        if (cancelled) return;
-        setLatest(Object.fromEntries(pairs.filter(Boolean) as [string, number][]));
+    latestGoalReadings()
+      .then((readings) => {
+        if (!cancelled) setLatest(readings);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [goals, API]);
+  }, [goals]);
 
-  /**
-   * How far between baseline and target this reading sits. A target below the
-   * baseline means lower is better — a 5k time, not a lift.
-   */
-  const fractionFor = (goal: Goal): number | null => {
-    const current = latest[goal.id];
-    if (goal.baselineValue == null || goal.targetValue == null || current == null) return null;
-    if (goal.targetValue === goal.baselineValue) return current >= goal.targetValue ? 1 : 0;
-    const raw = (current - goal.baselineValue) / (goal.targetValue - goal.baselineValue);
-    return Math.max(0, Math.min(1, raw));
+  /** Same function the server completes a goal with, so the bar can't lie. */
+  const fractionFor = (goal: Goal): number | null =>
+    goalProgressFraction(goal.baselineValue, goal.targetValue, latest[goal.id]);
+
+  const openPetition = (goalId: string) =>
+    petitions.find((p) => p.goalId === goalId && p.status === "open") ?? null;
+
+  /** Rule 03: live once someone else has signed it off. */
+  const signOffAt = (goal: Goal) => goal.approvedAt ?? signedOff[goal.id] ?? null;
+
+  /** Runs an action, surfacing whatever the server said if it says no. */
+  const act = async (goalId: string, run: () => Promise<Response>, onOk: (body: any) => void) => {
+    setBusy(goalId);
+    try {
+      const res = await run();
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setError(null);
+        onOk(body);
+      } else {
+        setError(body.error ?? "That didn't go through.");
+      }
+    } finally {
+      setBusy(null);
+    }
   };
+
+  const approve = (goal: Goal) =>
+    act(
+      goal.id,
+      () => apiFetch(`/goals/${goal.id}/approve`, { method: "POST" }),
+      (body) => setSignedOff((prev) => ({ ...prev, [goal.id]: body.approvedAt }))
+    );
+
+  const raisePetition = (goal: Goal) =>
+    act(
+      goal.id,
+      () => apiFetch(`/goals/${goal.id}/petitions`, { method: "POST", body: "{}" }),
+      () => {
+        loadPetitions().catch(() => {});
+      }
+    );
 
   const submitReading = async (goal: Goal) => {
     const value = Number(reading);
     if (!Number.isFinite(value)) return;
-    const res = await fetch(`${API}/goals/${goal.id}/progress`, {
+    const res = await apiFetch(`/goals/${goal.id}/progress`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value }),
@@ -122,8 +179,18 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
   const isMine = currentUser?.id === selectedUserId;
 
   // Rule 01, checked as you type so the rejection isn't a surprise on submit.
+  const baseline = Number(draft.from);
+  const target = Number(draft.to);
+  const hasNumbers = draft.from.trim() !== "" && draft.to.trim() !== "" &&
+    Number.isFinite(baseline) && Number.isFinite(target);
+
   const eligibility = draft.description.trim()
-    ? goalEligibilityError(draft.description, draft.target)
+    ? goalEligibilityError(draft.description, draft.to) ??
+      (hasNumbers
+        ? baseline === target
+          ? "Start and target can't be the same — there'd be nothing to chase."
+          : null
+        : "Give it a starting number and a target, so progress can be tracked.")
     : null;
 
   const submit = () => {
@@ -136,13 +203,17 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
       category: draft.category.trim() || "General",
       description: draft.description.trim(),
       points: draft.points,
-      target: draft.target.trim() || undefined,
+      baseline: `${baseline}${draft.unit ? ` ${draft.unit}` : ""}`,
+      target: `${target}${draft.unit ? ` ${draft.unit}` : ""}`,
+      baselineValue: baseline,
+      targetValue: target,
+      unit: draft.unit.trim() || undefined,
       isCompleted: false,
       proofs: [],
       createdDate: new Date().toISOString().split("T")[0],
     });
 
-    setDraft({ category: "", description: "", target: "", points: 1 });
+    setDraft({ category: "", description: "", from: "", to: "", unit: "", points: 1 });
   };
 
   if (!selected) {
@@ -219,7 +290,10 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
       </div>
 
       <div className="divide-y divide-line border-y border-line">
-        {userGoals.map((goal) => (
+        {userGoals.map((goal) => {
+          // A goal with numbers. Its completion belongs to its readings.
+          const measured = goal.baselineValue != null && goal.targetValue != null;
+          return (
           <div
             key={goal.id}
             className=" p-4 flex items-start gap-3
@@ -237,8 +311,34 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
               <p className="text-xs text-ink-muted mt-0.5">
                 {goal.category}
                 {goal.target ? ` · target ${goal.target}` : ""}
-                {goal.approvedAt ? " · approved" : " · awaiting group sign-off"}
+                {signOffAt(goal) ? " · signed off" : ""}
               </p>
+
+              {/* Rule 03: it isn't live until someone else signs it off. */}
+              {!signOffAt(goal) ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.1em]
+                                   text-skip-700 bg-skip-50 border border-skip-100 rounded-md px-2 py-1">
+                    <Lock size={11} /> Not live
+                  </span>
+                  {isMine ? (
+                    <span className="text-xs text-ink-muted">
+                      Another player has to sign this off before it counts.
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => approve(goal)}
+                      disabled={busy === goal.id}
+                      className="min-h-[44px] px-3 -my-1.5 rounded-lg text-xs font-semibold text-ink
+                                 border border-line bg-paper-card cursor-pointer inline-flex items-center gap-1.5
+                                 transition-colors duration-150 ease-settle hover:bg-clean-50 hover:border-clean-500
+                                 hover:text-clean-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Stamp size={13} /> Sign off {selected.name}'s goal
+                    </button>
+                  )}
+                </div>
+              ) : null}
               {(() => {
                 const fraction = fractionFor(goal);
                 if (fraction === null) return null;
@@ -278,52 +378,87 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                   />
                   <button
                     onClick={() => submitReading(goal)}
-                    className="min-h-[40px] px-3 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer"
+                    className="min-h-[44px] px-3 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer"
                   >
                     Save
                   </button>
                 </div>
               ) : null}
-
-              {petitioned.includes(goal.id) ? (
-                <p className="text-xs text-clean-600 mt-1.5 leading-relaxed">
-                  Petition raised — set a meeting time. Only people who attend get a vote, the
-                  replacement must be worth {goal.points} points or more, and a tie keeps this goal.
+              {logging === goal.id ? (
+                <p className="text-xs text-ink-muted mt-1.5 tnum">
+                  {goal.isCompleted
+                    ? "Already done. Later readings are kept, but it only completes once."
+                    : `Reaching ${goal.targetValue}${goal.unit ? ` ${goal.unit}` : ""} completes this goal. Nothing else does.`}
                 </p>
               ) : null}
+
+              {(() => {
+                const petition = openPetition(goal.id);
+                if (!petition) return null;
+                return (
+                  <p className="text-xs text-clean-700 bg-clean-50 border border-clean-100 rounded-lg
+                                px-2.5 py-2 mt-2 leading-relaxed">
+                    <strong className="font-semibold">
+                      {petition.raisedByName} petitioned to replace this
+                    </strong>{" "}
+                    on {new Date(petition.raisedAt).toLocaleDateString()}. Set a meeting time. Only
+                    people who attend get a vote, the replacement must be worth {goal.points} point
+                    {goal.points > 1 ? "s" : ""} or more, and a tie keeps this goal.
+                  </p>
+                );
+              })()}
             </div>
             {isMine ? (
               <>
-                <button
-                  onClick={() => onUpdateGoal({ ...goal, isCompleted: !goal.isCompleted })}
-                  title={goal.isCompleted ? "Mark not done" : "Mark completed"}
-                  className={`min-w-[40px] min-h-[40px] grid place-items-center rounded-lg cursor-pointer
-                    transition-colors duration-150 ease-settle ${
-                      goal.isCompleted ? "bg-clean-100 text-clean-700" : "bg-paper-sunk text-ink-muted hover:text-ink"
-                    }`}
-                >
-                  <Check size={15} />
-                </button>
-                {goal.baselineValue != null && goal.targetValue != null ? (
+                {/*
+                  Rule 11 gives the title to the most goals completed AT TARGET,
+                  so a measured goal has no tick — the reading is what completes
+                  it, and the server refuses a hand-tick either way. Goals from
+                  before the numbers existed keep the toggle.
+                */}
+                {measured ? (
                   <button
                     onClick={() => {
                       setLogging(logging === goal.id ? null : goal.id);
                       setReading("");
                     }}
-                    title="Record where you are now"
-                    className="min-w-[40px] min-h-[40px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
-                               cursor-pointer transition-colors duration-150 ease-settle hover:bg-clean-100 hover:text-clean-700"
+                    title={
+                      goal.isCompleted
+                        ? `Done at ${goal.targetValue}${goal.unit ? ` ${goal.unit}` : ""} — log another reading`
+                        : `Log a reading. ${goal.targetValue}${goal.unit ? ` ${goal.unit}` : ""} completes it.`
+                    }
+                    className={`min-w-[44px] min-h-[44px] grid place-items-center rounded-lg cursor-pointer
+                      transition-colors duration-150 ease-settle ${
+                        goal.isCompleted
+                          ? "bg-clean-100 text-clean-700"
+                          : "bg-paper-sunk text-ink-muted hover:bg-clean-100 hover:text-clean-700"
+                      }`}
                   >
-                    <TrendingUp size={15} />
+                    {goal.isCompleted ? <Check size={15} /> : <TrendingUp size={15} />}
                   </button>
-                ) : null}
+                ) : (
+                  <button
+                    onClick={() => onUpdateGoal({ ...goal, isCompleted: !goal.isCompleted })}
+                    title={goal.isCompleted ? "Mark not done" : "Mark completed"}
+                    className={`min-w-[44px] min-h-[44px] grid place-items-center rounded-lg cursor-pointer
+                      transition-colors duration-150 ease-settle ${
+                        goal.isCompleted ? "bg-clean-100 text-clean-700" : "bg-paper-sunk text-ink-muted hover:text-ink"
+                      }`}
+                  >
+                    <Check size={15} />
+                  </button>
+                )}
                 {/* Rule 04: a goal can only be swapped out once it is completed. */}
                 {goal.isCompleted ? (
                   <button
-                    onClick={() => setPetitioned((p) => [...p, goal.id])}
-                    disabled={petitioned.includes(goal.id)}
-                    title="Petition the group to replace this goal"
-                    className="min-w-[40px] min-h-[40px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
+                    onClick={() => raisePetition(goal)}
+                    disabled={busy === goal.id || openPetition(goal.id) !== null}
+                    title={
+                      openPetition(goal.id)
+                        ? "A petition is already open on this goal"
+                        : "Petition the group to replace this goal"
+                    }
+                    className="min-w-[44px] min-h-[44px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
                                cursor-pointer transition-colors duration-150 ease-settle
                                hover:bg-clean-100 hover:text-clean-700 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -333,7 +468,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                 <button
                   onClick={() => onDeleteGoal(goal.id)}
                   title="Delete goal"
-                  className="min-w-[40px] min-h-[40px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
+                  className="min-w-[44px] min-h-[44px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
                              cursor-pointer transition-colors duration-150 ease-settle hover:bg-owed-50 hover:text-owed-600"
                 >
                   <Trash2 size={15} />
@@ -341,8 +476,15 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
               </>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
+
+      {error ? (
+        <p role="alert" className="text-sm text-owed-600 bg-owed-50 border border-owed-100 rounded-xl px-3 py-2">
+          {error}
+        </p>
+      ) : null}
 
       {isMine && left > 0 && userGoals.length < 6 ? (
         <div className="pt-5 space-y-3">
@@ -374,21 +516,54 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
             className="w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
                        focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
           />
-          <div className="flex gap-2">
-            <input
-              value={draft.category}
-              onChange={(e) => setDraft({ ...draft, category: e.target.value })}
-              placeholder="Your category"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-            />
-            <input
-              value={draft.target}
-              onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-              placeholder="Target (the number)"
-              className="flex-1 min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
-                         focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
-            />
+          <input
+            value={draft.category}
+            onChange={(e) => setDraft({ ...draft, category: e.target.value })}
+            placeholder="Your category"
+            className="w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
+                       focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+          />
+
+          {/* Where you start and what counts as done — the two numbers a progress bar needs. */}
+          <div className="grid grid-cols-[1fr_1fr_1fr] gap-2">
+            <label className="text-xs text-ink-muted">
+              Today
+              <input
+                inputMode="decimal"
+                value={draft.from}
+                onChange={(e) => setDraft({ ...draft, from: e.target.value })}
+                placeholder="70"
+                className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card tnum
+                           focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+              />
+            </label>
+            <label className="text-xs text-ink-muted">
+              Target
+              <input
+                inputMode="decimal"
+                value={draft.to}
+                onChange={(e) => setDraft({ ...draft, to: e.target.value })}
+                placeholder="100"
+                className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card tnum
+                           focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+              />
+            </label>
+            <label className="text-xs text-ink-muted">
+              Unit
+              <input
+                value={draft.unit}
+                onChange={(e) => setDraft({ ...draft, unit: e.target.value })}
+                placeholder="kg"
+                className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
+                           focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+              />
+            </label>
           </div>
+          {hasNumbers && target < baseline ? (
+            <p className="text-xs text-ink-muted">
+              Target is lower than today, so this one counts down — a time to beat.
+            </p>
+          ) : null}
 
           {eligibility ? (
             <p role="alert" className="text-sm text-skip-700 bg-skip-50 border border-skip-100 rounded-xl px-3 py-2">
@@ -398,7 +573,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
 
           <button
             onClick={submit}
-            disabled={!draft.description.trim() || !canAfford(draft.points) || !!eligibility}
+            disabled={!draft.description.trim() || !canAfford(draft.points) || !!eligibility || !hasNumbers}
             className="w-full flex items-center justify-center gap-2 min-h-[48px] bg-ink text-paper rounded-xl text-sm font-semibold
                        cursor-pointer transition-transform duration-150 ease-settle active:scale-[.99]
                        disabled:opacity-40 disabled:cursor-not-allowed"

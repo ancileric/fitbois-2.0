@@ -1,3 +1,4 @@
+import { currentPlayerId } from './http';
 import { User, Goal, WorkoutDay, WeeklyPlan } from '../types';
 
 // In production, use relative URL since frontend and backend are on same server
@@ -89,11 +90,13 @@ class ApiService {
     const requestPromise = (async (): Promise<T> => {
       try {
         const response = await this.fetchWithTimeout(url, {
+          ...options,
           headers: {
             'Content-Type': 'application/json',
+            // Every write states which player is making it; the server holds us to it.
+            ...(currentPlayerId() ? { 'x-player-id': currentPlayerId() as string } : {}),
             ...options?.headers,
           },
-          ...options,
         });
 
         if (!response.ok) {

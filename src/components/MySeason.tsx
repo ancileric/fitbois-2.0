@@ -11,6 +11,8 @@ import {
 import { User, WeeklyPlan, WorkoutDay } from "../types";
 import WeeklyPlanModal from "./WeeklyPlanModal";
 import { getWeekDates } from "../utils/dateUtils";
+import { apiFetch } from "../services/http";
+import { SEASON_WEEKS } from "../utils/seasonEngine";
 
 /**
  * The home screen, written for one person: your week first, your money second,
@@ -18,8 +20,6 @@ import { getWeekDates } from "../utils/dateUtils";
  * workout sheet — this screen only reports what the rules already decided.
  */
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
-const SEASON_WEEKS = 24;
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 type Standing = "active" | "suspended" | "out";
@@ -174,16 +174,9 @@ const MySeason: React.FC<MySeasonProps> = ({
   const load = useCallback(async () => {
     try {
       setError(null);
-      const usersRes = await fetch(`${API}/users`);
-      if (!usersRes.ok) throw new Error(`Could not load players (${usersRes.status})`);
-      const users = await usersRes.json();
-      const seasons = await Promise.all(
-        users.map(async (u: { id: string }) => {
-          const res = await fetch(`${API}/season/${u.id}`);
-          if (!res.ok) throw new Error(`Could not load season for ${u.id}`);
-          return res.json();
-        })
-      );
+      const res = await apiFetch(`/seasons`);
+      if (!res.ok) throw new Error(`Could not load players (${res.status})`);
+      const seasons = await res.json();
       setPlayers(seasons);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -200,11 +193,11 @@ const MySeason: React.FC<MySeasonProps> = ({
     () => players.find((p) => p.userId === currentUser?.id) ?? null,
     [players, currentUser]
   );
-  const call = async (url: string, body?: object) => {
+  const call = async (path: string, body?: object) => {
     setBusy(true);
     setNotice(null);
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body ?? {}),
@@ -462,7 +455,7 @@ const MySeason: React.FC<MySeasonProps> = ({
                     </span>
                   </span>
                   <button
-                    onClick={() => call(`${API}/fines/${f.id}/settle`)}
+                    onClick={() => call(`/fines/${f.id}/settle`)}
                     disabled={busy || me.standing === "out"}
                     className="min-h-[40px] px-4 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer
                                disabled:opacity-35 disabled:cursor-not-allowed"
@@ -479,7 +472,7 @@ const MySeason: React.FC<MySeasonProps> = ({
               </span>
               <button
                 onClick={() =>
-                  call(`${API}/skip-tokens`, {
+                  call(`/skip-tokens`, {
                     userId: me.userId,
                     week: me.currentWeek + 1,
                     approvedBy: "group",
@@ -520,7 +513,7 @@ const MySeason: React.FC<MySeasonProps> = ({
           }}
           onSwap={async (from, to) => {
             const res = await fetch(
-              `${API}/weekly-plans/${currentUser.id}/${me.currentWeekProgress.week}/swap`,
+              `/weekly-plans/${currentUser.id}/${me.currentWeekProgress.week}/swap`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

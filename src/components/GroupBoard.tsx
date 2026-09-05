@@ -4,6 +4,8 @@ import { User } from "../types";
 import Feed from "./Feed";
 import PlayerSheet from "./PlayerSheet";
 import { shareCard } from "../utils/shareCard";
+import { apiFetch } from "../services/http";
+import { SEASON_WEEKS } from "../utils/seasonEngine";
 
 /**
  * The group, at group scale: who is still standing, what the season has cost
@@ -13,7 +15,6 @@ import { shareCard } from "../utils/shareCard";
  * My season; repeating it here only gave two places to read the same thing.
  */
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 type Standing = "active" | "suspended" | "out";
 
@@ -64,16 +65,9 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const usersRes = await fetch(`${API}/users`);
-      if (!usersRes.ok) throw new Error(`Could not load players (${usersRes.status})`);
-      const users = await usersRes.json();
-      const seasons = await Promise.all(
-        users.map(async (u: { id: string }) => {
-          const res = await fetch(`${API}/season/${u.id}`);
-          if (!res.ok) throw new Error(`Could not load season for ${u.id}`);
-          return res.json();
-        })
-      );
+      const res = await apiFetch(`/seasons`);
+      if (!res.ok) throw new Error(`Could not load players (${res.status})`);
+      const seasons = await res.json();
       setRows(seasons);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -103,7 +97,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
   const syncFines = async () => {
     setBusy(true);
     try {
-      await fetch(`${API}/fines/sync`, {
+      await apiFetch(`/fines/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",
@@ -118,7 +112,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
     try {
       const result = await shareCard({
         week: rows[0]?.currentWeek ?? 1,
-        seasonWeeks: 24,
+        seasonWeeks: SEASON_WEEKS,
         rows: ranked.map((r) => ({
           name: r.name,
           cleanWeeks: r.cleanWeeks,

@@ -17,6 +17,9 @@
 /** A clean week is 5 workouts. Flat for everyone, every week. */
 const WORKOUTS_PER_WEEK = 5;
 
+/** The season is 24 weeks long. Nothing can be logged outside it. */
+const SEASON_WEEKS = 24;
+
 /** The ladder sets what a miss costs. Everyone starts at level 1. */
 const FINE_BY_LEVEL = { 1: 500, 2: 1000, 3: 2000 };
 
@@ -67,6 +70,12 @@ const runSeason = ({
 
   const weeks = [];
 
+  // The cap belongs to the rules, not to the API that hands out tokens: only the
+  // first three approved weeks waive a fine, the rest are ordinary missed weeks.
+  const honouredSkips = new Set(
+    [...new Set(skipWeeks)].sort((a, b) => a - b).slice(0, MAX_SKIP_TOKENS)
+  );
+
   // Elimination breaks out of the loop below, so nothing after it is ever replayed:
   // out is out, and the rest of the season doesn't happen.
   for (let week = 1; week <= completedWeeks; week++) {
@@ -78,7 +87,7 @@ const runSeason = ({
 
     const workouts = countWorkouts(userId, workoutDays, week);
     const isClean = workouts >= WORKOUTS_PER_WEEK;
-    const isSkipped = skipWeeks.includes(week);
+    const isSkipped = honouredSkips.has(week);
 
     if (isSkipped && !isClean) {
       // A token cancels the fine and leaves the ladder untouched: neither a
@@ -159,6 +168,9 @@ const currentFine = (state) => FINE_BY_LEVEL[state.priceLevel];
  * Rule 09: three a season, never three in a row, dead in the final two weeks.
  */
 const skipTokenBlocker = (week, seasonWeeks, usedWeeks) => {
+  if (!Number.isInteger(week) || week < 1 || week > seasonWeeks) {
+    return `Week ${week} isn't in the season — it runs weeks 1 to ${seasonWeeks}`;
+  }
   if (usedWeeks.length >= MAX_SKIP_TOKENS) return 'All 3 skip tokens used';
   if (week > seasonWeeks - 2) return 'Not usable in the final two weeks';
 
@@ -242,8 +254,25 @@ const goalSplitError = (points) => {
   return null;
 };
 
+/**
+ * How far a reading sits between where the goal started and what counts as done.
+ *
+ * 1 means done. Rule 11 gives the challenge title to the most goals completed at
+ * target, so this is the only thing that may complete a measured goal — a tap
+ * cannot. A target below the baseline means lower is better: a 5k time, not a
+ * lift. Returns null when the goal has no numbers to measure against.
+ */
+const goalProgressFraction = (baseline, target, current) => {
+  if (baseline == null || target == null || current == null) return null;
+  if (target === baseline) return current >= target ? 1 : 0;
+  const fraction = (current - baseline) / (target - baseline);
+  return Math.max(0, Math.min(1, fraction));
+};
+
 module.exports = {
+  goalProgressFraction,
   WORKOUTS_PER_WEEK,
+  SEASON_WEEKS,
   FINE_BY_LEVEL,
   WEEKS_TO_MOVE,
   MAX_SKIP_TOKENS,

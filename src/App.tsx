@@ -16,12 +16,13 @@ import { apiService } from "./services/api";
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
 const GroupBoard = lazy(() => import("./components/GroupBoard"));
+const Rules = lazy(() => import("./components/Rules"));
 const MeView = lazy(() => import("./components/MeView"));
 
 
 const Admin = lazy(() => import("./components/Admin"));
 
-type ActiveView = "me" | "group" | "admin";
+type ActiveView = "me" | "group" | "rules" | "admin";
 
 const SNAPSHOT_KEY = "fitbois:snapshot";
 const SNAPSHOT_VERSION = 1;
@@ -94,7 +95,9 @@ function AppContent() {
     () => {
       // A view name saved by an older build must not leave the page blank.
       const saved = localStorage.getItem("activeView");
-      return saved === "me" || saved === "group" || saved === "admin" ? saved : "me";
+      return saved === "me" || saved === "group" || saved === "rules" || saved === "admin"
+        ? saved
+        : "me";
     }
   );
   const [isOffline, setIsOffline] = useState(false);
@@ -543,6 +546,8 @@ function AppContent() {
 
             {activeView === "group" && <GroupBoard currentUser={currentUser} />}
 
+            {activeView === "rules" && <Rules />}
+
             {activeView === "admin" && (
               <Admin
                 users={users}
@@ -552,6 +557,9 @@ function AppContent() {
                 onDeleteUser={deleteUser}
                 onUpdateWorkoutDay={updateWorkoutDay}
                 onRecalculateConsistency={recalculateUserConsistency}
+                onSettingsChange={(settings) =>
+                  setAdminSettings((prev) => ({ ...prev, ...settings }))
+                }
               />
             )}
 

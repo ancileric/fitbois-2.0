@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Goal } from "../types";
+import { apiFetch, latestGoalReadings } from "../services/http";
 
 /**
  * One player's season, opened from the group list.
@@ -9,7 +10,6 @@ import { Goal } from "../types";
  * the editing to the person it belongs to.
  */
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 interface Season {
   userId: string;
@@ -44,25 +44,15 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
 
   const load = useCallback(async () => {
     const [seasonRes, goalsRes] = await Promise.all([
-      fetch(`${API}/season/${userId}`),
-      fetch(`${API}/goals/user/${userId}`),
+      apiFetch(`/season/${userId}`),
+      apiFetch(`/goals/user/${userId}`),
     ]);
     const seasonData = seasonRes.ok ? await seasonRes.json() : null;
     const goalData: Goal[] = goalsRes.ok ? await goalsRes.json() : [];
     setSeason(seasonData);
     setGoals(goalData);
 
-    const readings = await Promise.all(
-      goalData
-        .filter((g) => g.baselineValue != null && g.targetValue != null)
-        .map(async (g) => {
-          const res = await fetch(`${API}/goals/${g.id}/progress`);
-          if (!res.ok) return null;
-          const rows = await res.json();
-          return rows.length ? ([g.id, rows[rows.length - 1].value] as const) : null;
-        })
-    );
-    setProgress(Object.fromEntries(readings.filter(Boolean) as [string, number][]));
+    setProgress(await latestGoalReadings());
   }, [userId]);
 
   useEffect(() => {

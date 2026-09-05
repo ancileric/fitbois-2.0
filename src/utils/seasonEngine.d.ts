@@ -57,6 +57,8 @@ export interface SeasonInput {
 
 /** A clean week is 5 workouts. Flat for everyone, every week. */
 export const WORKOUTS_PER_WEEK: 5;
+/** The season is 24 weeks long. Nothing can be logged outside it. */
+export const SEASON_WEEKS: 24;
 /** The ladder sets what a miss costs. Everyone starts at level 1. */
 export const FINE_BY_LEVEL: Record<PriceLevel, number>;
 /** Misses at one price before it rises; clean weeks in a row before it falls. */
@@ -75,3 +77,12 @@ export function unpaidFines(state: SeasonState, settledWeeks?: number[]): WeekRe
 export function goalSplitError(points: number[]): string | null;
 /** Rule 01: physical output, measured by a number, provable. Null when eligible. */
 export function goalEligibilityError(description: string, target?: string): string | null;
+/**
+ * How far a reading sits between baseline and target, 0 to 1. 1 completes the
+ * goal — nothing else does. Null when the goal has no numbers.
+ */
+export function goalProgressFraction(
+  baseline: number | null | undefined,
+  target: number | null | undefined,
+  current: number | null | undefined
+): number | null;

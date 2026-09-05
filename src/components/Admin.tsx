@@ -6,11 +6,13 @@ import {
   Trash2,
   UserPlus,
   RotateCcw,
-  UserCheck
+  UserCheck,
+  CalendarPlus
 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './ToastContext';
-import { getCurrentWeek } from '../utils/dateUtils';
+import { apiFetch } from '../services/http';
+import { SEASON_WEEKS, WORKOUTS_PER_WEEK } from '../utils/seasonEngine';
 
 interface AdminProps {
   users: User[];
@@ -20,6 +22,8 @@ interface AdminProps {
   onDeleteUser: (userId: string) => void;
   onUpdateWorkoutDay: (workoutDay: WorkoutDay) => void;
   onRecalculateConsistency?: () => void;
+  /** The season clock moved. App owns it; Admin only reports what the server said. */
+  onSettingsChange: (settings: AdminSettings) => void;
 }
 
 const Admin: React.FC<AdminProps> = ({
@@ -29,6 +33,7 @@ const Admin: React.FC<AdminProps> = ({
   onUpdateUser,
   onDeleteUser,
   onRecalculateConsistency,
+  onSettingsChange,
 }) => {
   const { showToast } = useToast();
   const [showAddUser, setShowAddUser] = useState(false);
@@ -37,8 +42,10 @@ const Admin: React.FC<AdminProps> = ({
     isOpen: boolean;
     title: string;
     message: string;
+    confirmLabel: string;
     onConfirm: () => void;
-  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  }>({ isOpen: false, title: '', message: '', confirmLabel: 'Confirm', onConfirm: () => {} });
+  const [advancing, setAdvancing] = useState(false);
 
   const [newUser, setNewUser] = useState({
     name: '',
@@ -125,10 +132,79 @@ const Admin: React.FC<AdminProps> = ({
       isOpen: true,
       title: 'Remove Participant',
       message: `Are you sure you want to remove ${user.name} from the challenge? This will delete all their data.`,
+      confirmLabel: 'Remove',
       onConfirm: () => {
         onDeleteUser(user.id);
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
       }
+    });
+  };
+
+  // ---- Moving the season on ----
+
+  const currentWeek = adminSettings.currentWeek;
+  const seasonOver = currentWeek >= SEASON_WEEKS;
+
+  /**
+   * How many players are short of a clean week right now.
+   *
+   * An upper bound on what advancing will bill: an approved skip token covers a
+   * miss and this screen doesn't hold tokens. The server decides — this is only
+   * what the admin is told before they commit.
+   */
+  const shortOfClean = users.filter(
+    (u) =>
+      u.standing !== 'out' &&
+      workoutDays.filter(
+        (w) => w.userId === u.id && w.week === currentWeek && w.isCompleted
+      ).length < WORKOUTS_PER_WEEK
+  ).length;
+
+  const advanceWeek = async () => {
+    setAdvancing(true);
+    try {
+      const res = await apiFetch('/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ currentWeek: currentWeek + 1 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error ?? 'Could not move the season on', 'error');
+        return;
+      }
+      // One clock: App holds it, the server decided it.
+      onSettingsChange({
+        challengeStartDate: data.challengeStartDate,
+        challengeEndDate: data.challengeEndDate,
+        currentWeek: data.currentWeek,
+        isActive: data.isActive,
+      });
+      // Fines, price levels and standings all moved with the week.
+      onRecalculateConsistency?.();
+      showToast(
+        `Week ${data.movedFrom} closed. ${data.finesIssued} fine${data.finesIssued === 1 ? '' : 's'} posted.`,
+        'success'
+      );
+    } catch {
+      showToast('Could not reach the API', 'error');
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
+  const confirmAdvance = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Close week ${currentWeek}`,
+      message:
+        `The season moves to week ${currentWeek + 1}. Week ${currentWeek} is scored on the way, ` +
+        `which posts a fine for up to ${shortOfClean} player${shortOfClean === 1 ? '' : 's'} short of ` +
+        `${WORKOUTS_PER_WEEK} workouts. Going back needs a forced override.`,
+      confirmLabel: `Advance to week ${currentWeek + 1}`,
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        advanceWeek();
+      },
     });
   };
 
@@ -168,7 +244,10 @@ const Admin: React.FC<AdminProps> = ({
         <dl className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-line border border-line rounded-lg overflow-hidden">
           <div className="bg-paper-card px-3 py-2.5">
             <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Week</dt>
-            <dd className="display text-2xl tnum mt-0.5">{adminSettings.currentWeek}</dd>
+            <dd className="display text-2xl tnum mt-0.5">
+              {currentWeek}
+              <span className="text-sm text-ink-muted"> / {SEASON_WEEKS}</span>
+            </dd>
           </div>
           <div className="bg-paper-card px-3 py-2.5">
             <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Active</dt>
@@ -195,6 +274,29 @@ const Admin: React.FC<AdminProps> = ({
             </dd>
           </div>
         </dl>
+
+        {/* The season only moves when someone says so — and it is hard to undo. */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-line rounded-lg bg-paper-card px-3 py-3">
+          <p className="text-sm text-ink-muted">
+            {seasonOver ? (
+              <>Week {SEASON_WEEKS} is the last one. The season is over.</>
+            ) : (
+              <>
+                Closing week <span className="tnum font-semibold text-ink">{currentWeek}</span> scores it and
+                fines up to <span className="tnum font-semibold text-owed-600">{shortOfClean}</span> player
+                {shortOfClean === 1 ? '' : 's'} short of {WORKOUTS_PER_WEEK} workouts.
+              </>
+            )}
+          </p>
+          <button
+            onClick={confirmAdvance}
+            disabled={advancing || seasonOver}
+            className="min-h-[44px] px-4 rounded-lg bg-primary-500 text-paper text-sm font-semibold hover:bg-primary-600 disabled:opacity-50 flex items-center gap-2"
+          >
+            <CalendarPlus size={18} />
+            {advancing ? 'Advancing…' : `Advance to week ${Math.min(currentWeek + 1, SEASON_WEEKS)}`}
+          </button>
+        </div>
       </section>
 
       {/* Users Table - Always visible */}
@@ -464,7 +566,7 @@ const Admin: React.FC<AdminProps> = ({
         isOpen={confirmDialog.isOpen}
         title={confirmDialog.title}
         message={confirmDialog.message}
-        confirmLabel="Remove"
+        confirmLabel={confirmDialog.confirmLabel}
         isDestructive={true}
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}

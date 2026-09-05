@@ -30,7 +30,7 @@ const corsOptions = {
       },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-player-id", "x-admin-key"],
 };
 
 // Middleware
@@ -83,6 +83,8 @@ async function runDatabaseInit() {
     "ALTER TABLE goals ADD COLUMN baseline_value REAL",
     "ALTER TABLE goals ADD COLUMN target_value REAL",
     "ALTER TABLE goals ADD COLUMN unit TEXT",
+    "ALTER TABLE fines ADD COLUMN voided_at TEXT",
+    "ALTER TABLE fines ADD COLUMN voided_reason TEXT",
   ];
   for (const sql of addColumns) {
     try {
@@ -203,6 +205,51 @@ const currentISTDayOfWeek = () => {
 async function seasonCurrentWeek() {
   const row = await db.get("SELECT current_week FROM admin_settings WHERE id = 1");
   return row ? Number(row.current_week) : 1;
+}
+
+// ==================== OWNERSHIP ====================
+
+/**
+ * Who is making this request.
+ *
+ * This is an ownership check, not authentication: the client states who it is
+ * and the server holds it to that. It stops one player writing to another's
+ * record — the common accident in a shared app — but anyone who can call the API
+ * directly can still claim to be someone else. Real auth is a separate job, and
+ * this is the seam it slots into.
+ */
+const actorOf = (req) => req.header("x-player-id") || req.body?.actorId || null;
+
+const isAdminRequest = (req) =>
+  Boolean(process.env.ADMIN_KEY) && req.header("x-admin-key") === process.env.ADMIN_KEY;
+
+/** Rejects the request unless the caller owns `ownerId` (or is an admin). */
+function denyUnlessOwner(req, res, ownerId) {
+  if (isAdminRequest(req)) return false;
+  const actor = actorOf(req);
+  if (!actor) {
+    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
+    return true;
+  }
+  if (actor !== ownerId) {
+    res.status(403).json({ error: "That record belongs to someone else" });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Rule 08: out is out for the season. Two fines while suspended ends it, and an
+ * ended season can't be written to. The UI already hides these controls — this is
+ * the server refusing to be told otherwise.
+ */
+async function denyIfOut(res, userId) {
+  const row = await db.get("SELECT standing FROM users WHERE id = ?", [userId]);
+  if (row?.standing !== "out") return false;
+  res.status(403).json({
+    error: "Out for the season — two fines while suspended. No buy-backs, and nothing more to log.",
+  });
+  return true;
 }
 
 // ==================== USER ROUTES ====================
@@ -603,7 +650,9 @@ app.post("/api/workouts", async (req, res) => {
     markedBy,
   } = req.body;
 
-  if (!userId || !week || !dayOfWeek || !date) {
+  if (denyUnlessOwner(req, res, userId)) return;
+
+  if (!userId || week == null || dayOfWeek == null || !date) {
     res.status(400).json({
       error: "Missing required fields: userId, week, dayOfWeek, date",
     });
@@ -616,10 +665,32 @@ app.post("/api/workouts", async (req, res) => {
 
   const timestamp = new Date().toISOString();
 
+  const weekNum = Number(week);
+  const dayNum = Number(dayOfWeek);
+
   try {
+    if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 7) {
+      res.status(400).json({ error: "dayOfWeek is 1-7, Monday to Sunday" });
+      return;
+    }
+    if (!Number.isInteger(weekNum) || weekNum < 1 || weekNum > engine.SEASON_WEEKS) {
+      res.status(400).json({ error: `Week is 1-${engine.SEASON_WEEKS}` });
+      return;
+    }
+    // You cannot have trained in a week that has not happened.
+    const currentWeek = await seasonCurrentWeek();
+    if (weekNum > currentWeek) {
+      res.status(400).json({
+        error: `Week ${weekNum} hasn't started — the season is on week ${currentWeek}`,
+      });
+      return;
+    }
+
+    if (await denyIfOut(res, userId)) return;
+
     const existingRow = await db.get(
       `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`,
-      [userId, week, dayOfWeek]
+      [userId, weekNum, dayNum]
     );
 
     const id = existingRow?.id || uuidv4();
@@ -632,8 +703,8 @@ app.post("/api/workouts", async (req, res) => {
       [
         id,
         userId,
-        week,
-        dayOfWeek,
+        weekNum,
+        dayNum,
         date,
         isCompleted ? 1 : 0,
         workoutType || null,
@@ -644,14 +715,14 @@ app.post("/api/workouts", async (req, res) => {
     );
 
     debug(
-      `Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`
+      `Upserted workout for user ${userId}, week ${weekNum}, day ${dayNum}`
     );
 
     const workout = {
       id,
       userId,
-      week,
-      dayOfWeek,
+      week: weekNum,
+      dayOfWeek: dayNum,
       date,
       isCompleted,
       workoutType: workoutType || null,
@@ -792,6 +863,169 @@ app.get("/api/goals/user/:userId", async (req, res) => {
   }
 });
 
+/**
+ * The one shape a progress reading is reported in. Both the single-goal route
+ * and the batch route map through it, so they cannot drift apart.
+ */
+const progressRow = (r) => ({
+  id: r.id,
+  value: Number(r.value),
+  note: r.note,
+  recordedAt: r.recorded_at,
+});
+
+// Every goal's readings in one shot, keyed by goal id. Same arrays as
+// /api/goals/:id/progress, but one table read instead of one per goal — Turso
+// charges a round trip each. Registered above /api/goals/:id so Express doesn't
+// read "progress" as a goal id.
+//
+// ponytail: returns the whole table — a season of readings is a few hundred
+// rows. Take a ?userId= filter if that ever stops being true.
+app.get("/api/goals/progress", async (req, res) => {
+  try {
+    const rows = await db.all(
+      "SELECT id, goal_id, value, note, recorded_at FROM goal_progress ORDER BY recorded_at ASC, id ASC"
+    );
+    const byGoal = {};
+    for (const r of rows) {
+      const list = byGoal[r.goal_id];
+      if (list) list.push(progressRow(r));
+      else byGoal[r.goal_id] = [progressRow(r)];
+    }
+    res.json(byGoal);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Rule 03: a goal is live once the group signs off.
+ *
+ * The inverse of denyUnlessOwner — signing off on your own goal is not a
+ * sign-off, so the caller has to be a different player. Any of the nine will
+ * do; this group is small enough that a quorum is a meeting, not a table.
+ */
+async function denyUnlessAnotherPlayer(req, res, ownerId) {
+  const actor = actorOf(req);
+  if (!actor) {
+    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
+    return true;
+  }
+  if (actor === ownerId) {
+    res.status(403).json({ error: "Sign-off comes from someone else. You can't approve your own goal." });
+    return true;
+  }
+  const player = await db.get("SELECT id FROM users WHERE id = ?", [actor]);
+  if (!player) {
+    res.status(403).json({ error: "Only a player in this season can sign off a goal" });
+    return true;
+  }
+  return false;
+}
+
+// Rule 03: another player signs the goal off and it goes live. Idempotent — the
+// first signature is the one that counts, a second changes nothing.
+app.post("/api/goals/:id/approve", async (req, res) => {
+  try {
+    const goal = await db.get("SELECT user_id, approved_at FROM goals WHERE id = ?", [req.params.id]);
+    if (!goal) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (await denyUnlessAnotherPlayer(req, res, goal.user_id)) return;
+
+    const approvedAt = goal.approved_at || new Date().toISOString();
+    if (!goal.approved_at) {
+      await db.run("UPDATE goals SET approved_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+        approvedAt,
+        req.params.id,
+      ]);
+    }
+    res.json({ id: req.params.id, approvedAt, approvedBy: actorOf(req) });
+  } catch (err) {
+    console.error("Error approving goal:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const petitionRow = (r) => ({
+  id: r.id,
+  goalId: r.goal_id,
+  raisedBy: r.raised_by,
+  raisedByName: r.raised_by_name,
+  reason: r.reason,
+  status: r.status,
+  raisedAt: r.raised_at,
+});
+
+// Every open petition in the season, so the board shows the same thing to
+// everyone. Registered above /api/goals/:id so Express doesn't read
+// "petitions" as a goal id.
+app.get("/api/goals/petitions", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT p.*, u.name AS raised_by_name
+       FROM petitions p JOIN users u ON p.raised_by = u.id
+       ORDER BY p.raised_at DESC`
+    );
+    res.json(rows.map(petitionRow));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Rule 04: a completed goal may be replaced by petition.
+ *
+ * Raising it is the whole record kept here — who asked, against which goal,
+ * when. The vote itself happens in the room: only people who attend get one,
+ * the replacement must be worth the same points or more, and a tie keeps the
+ * original.
+ *
+ * ponytail: no ballot table. Add one when the group actually votes in the app
+ * rather than in person.
+ */
+app.post("/api/goals/:id/petitions", async (req, res) => {
+  try {
+    const goal = await db.get("SELECT user_id, is_completed FROM goals WHERE id = ?", [req.params.id]);
+    if (!goal) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, goal.user_id)) return;
+    if (!goal.is_completed) {
+      res.status(400).json({ error: "Only a completed goal can be replaced. Finish this one first." });
+      return;
+    }
+
+    const open = await db.get("SELECT id FROM petitions WHERE goal_id = ? AND status = 'open'", [
+      req.params.id,
+    ]);
+    if (open) {
+      res.status(409).json({ error: "A petition is already open on this goal" });
+      return;
+    }
+
+    const id = uuidv4();
+    const raisedAt = new Date().toISOString();
+    const reason = req.body?.reason ? String(req.body.reason).slice(0, 200) : null;
+    await db.run(
+      "INSERT INTO petitions (id, goal_id, raised_by, reason, status, raised_at) VALUES (?, ?, ?, ?, 'open', ?)",
+      [id, req.params.id, goal.user_id, reason, raisedAt]
+    );
+
+    const row = await db.get(
+      `SELECT p.*, u.name AS raised_by_name
+       FROM petitions p JOIN users u ON p.raised_by = u.id WHERE p.id = ?`,
+      [id]
+    );
+    res.status(201).json(petitionRow(row));
+  } catch (err) {
+    console.error("Error raising petition:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/goals/:id", async (req, res) => {
   try {
     const row = await db.get(`SELECT * FROM goals WHERE id = ?`, [
@@ -859,8 +1093,26 @@ app.post("/api/goals", async (req, res) => {
       return;
     }
 
-    // Rule 01: physical output, measured by a number, provable.
-    const eligibility = engine.goalEligibilityError(description, target);
+    if (denyUnlessOwner(req, res, userId)) return;
+
+    // Rule 01 says a goal is measured by a number, and progress needs two of them:
+    // where you start and what counts as done.
+    const baseNum = Number(baselineValue);
+    const targetNum = Number(targetValue);
+    if (!Number.isFinite(baseNum) || !Number.isFinite(targetNum)) {
+      res.status(400).json({
+        error: "Give it a starting number and a target, so progress can be tracked.",
+      });
+      return;
+    }
+    if (baseNum === targetNum) {
+      res.status(400).json({ error: "Start and target can't be the same — there'd be nothing to chase." });
+      return;
+    }
+
+    // Rule 01: physical output, provable, measured by a number. The numbers above
+    // satisfy the last test, so they are what the check reads.
+    const eligibility = engine.goalEligibilityError(description, target ?? String(targetNum));
     if (eligibility) {
       res.status(400).json({ error: eligibility });
       return;
@@ -923,6 +1175,9 @@ app.post("/api/goals", async (req, res) => {
       points: wanted,
       baseline: baseline || null,
       target: target || null,
+      baselineValue: baseNum,
+      targetValue: targetNum,
+      unit: unit || null,
       isCompleted: false,
       completedDate: null,
       createdDate,
@@ -950,6 +1205,34 @@ app.put("/api/goals/:id", async (req, res) => {
   }
 
   try {
+    const owner = await db.get(
+      "SELECT user_id, target_value, is_completed FROM goals WHERE id = ?",
+      [req.params.id]
+    );
+    if (!owner) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, owner.user_id)) return;
+
+    // Rule 11 gives the challenge title to the most goals completed AT TARGET.
+    // A goal with numbers is completed by a reading that reaches the target —
+    // POST /api/goals/:id/progress does that. This route is the only other way
+    // is_completed could move, so it refuses to move it, in either direction:
+    // hand-ticking would be a way to win by clicking, and hand-unticking would
+    // be a way to bank a second completion off the same target.
+    if (
+      isCompleted !== undefined &&
+      owner.target_value != null &&
+      Boolean(isCompleted) !== Boolean(owner.is_completed)
+    ) {
+      res.status(400).json({
+        error:
+          "This goal is measured. Log a reading that reaches the target — completion follows the numbers, not a tap.",
+      });
+      return;
+    }
+
     const eligibility = engine.goalEligibilityError(description, target);
     if (eligibility) {
       res.status(400).json({ error: eligibility });
@@ -977,9 +1260,14 @@ app.put("/api/goals/:id", async (req, res) => {
     }
 
     const sanitizedDescription = sanitizeString(description);
-    const completedDate = isCompleted
-      ? new Date().toISOString().split("T")[0]
-      : null;
+
+    // null here means "leave completion alone". A measured goal always does —
+    // its readings own those two columns. A legacy goal only moves when the
+    // caller actually said so; leaving isCompleted out used to silently clear
+    // it, which was the same bypass by omission.
+    const nextCompleted =
+      owner.target_value != null || isCompleted === undefined ? null : isCompleted ? 1 : 0;
+    const completedDate = nextCompleted === 1 ? new Date().toISOString().split("T")[0] : null;
 
     const result = await db.run(
       `UPDATE goals SET
@@ -987,8 +1275,8 @@ app.put("/api/goals/:id", async (req, res) => {
         points = COALESCE(?, points),
         baseline = COALESCE(?, baseline),
         target = COALESCE(?, target),
-        is_completed = ?,
-        completed_date = ?,
+        is_completed = COALESCE(?, is_completed),
+        completed_date = CASE WHEN ? IS NULL THEN completed_date ELSE ? END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
@@ -996,7 +1284,8 @@ app.put("/api/goals/:id", async (req, res) => {
         points ?? null,
         baseline ?? null,
         target ?? null,
-        isCompleted ? 1 : 0,
+        nextCompleted,
+        nextCompleted,
         completedDate,
         req.params.id,
       ]
@@ -1040,6 +1329,13 @@ app.put("/api/goals/:id", async (req, res) => {
 
 app.delete("/api/goals/:id", async (req, res) => {
   try {
+    const owner = await db.get("SELECT user_id FROM goals WHERE id = ?", [req.params.id]);
+    if (!owner) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, owner.user_id)) return;
+
     const result = await db.run("DELETE FROM goals WHERE id = ?", [
       req.params.id,
     ]);
@@ -1155,6 +1451,8 @@ app.post("/api/weekly-plans", async (req, res) => {
     res.status(400).json({ error: "userId is required" });
     return;
   }
+  if (denyUnlessOwner(req, res, userId)) return;
+
   const weekNum = Number(week);
   if (!Number.isInteger(weekNum) || weekNum < 1) {
     res.status(400).json({ error: "week must be a positive integer" });
@@ -1194,12 +1492,7 @@ app.post("/api/weekly-plans", async (req, res) => {
       res.status(404).json({ error: `User ${userId} not found` });
       return;
     }
-    if (user.standing === "out") {
-      res
-        .status(403)
-        .json({ error: "User is eliminated — cannot submit a plan" });
-      return;
-    }
+    if (await denyIfOut(res, userId)) return;
 
     const required = engine.WORKOUTS_PER_WEEK;
     if (uniqueDays.length < required) {
@@ -1227,17 +1520,23 @@ app.post("/api/weekly-plans", async (req, res) => {
     }
 
     const existing = await db.get(
-      `SELECT id, committed_at FROM weekly_plans WHERE user_id = ? AND week = ?`,
+      `SELECT id, committed_at, swaps_used FROM weekly_plans WHERE user_id = ? AND week = ?`,
       [userId, weekNum]
     );
 
     const id = existing?.id || uuidv4();
     const committedAt = existing?.committed_at || new Date().toISOString();
+    const swapsUsed = Number(existing?.swaps_used || 0);
 
+    // Upsert, not INSERT OR REPLACE: re-committing must not hand back a spent swap.
     await db.run(
-      `INSERT OR REPLACE INTO weekly_plans (
+      `INSERT INTO weekly_plans (
         id, user_id, week, committed_days, committed_at, created_by, swaps_used, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, week) DO UPDATE SET
+        committed_days = excluded.committed_days,
+        created_by = excluded.created_by,
+        updated_at = CURRENT_TIMESTAMP`,
       [id, userId, weekNum, JSON.stringify(uniqueDays), committedAt, validCreatedBy]
     );
 
@@ -1252,6 +1551,7 @@ app.post("/api/weekly-plans", async (req, res) => {
       committedDays: uniqueDays,
       committedAt,
       createdBy: validCreatedBy,
+      swapsUsed,
     });
   } catch (err) {
     console.error("Error upserting weekly plan:", err.message);
@@ -1300,6 +1600,9 @@ app.post("/api/weekly-plans/:userId/:week/swap", async (req, res) => {
       res.status(400).json({ error: "Pick a different day to move it to" });
       return;
     }
+
+    if (denyUnlessOwner(req, res, userId)) return;
+    if (await denyIfOut(res, userId)) return;
 
     const plan = await db.get(
       "SELECT id, committed_days, swaps_used FROM weekly_plans WHERE user_id = ? AND week = ?",
@@ -1370,6 +1673,123 @@ app.get("/api/settings", async (req, res) => {
   }
 });
 
+/**
+ * Move the season on.
+ *
+ * `current_week` is the season's clock: every fine, price level and standing is
+ * replayed against it, and nothing was able to write it. Advancing closes the
+ * week that just ended, so the fines it produced are posted here — by the same
+ * `syncFines` the rest of the app uses, never by rule logic copied into a route.
+ *
+ * Going backwards is refused by default. Fines come from completed weeks, so a
+ * rewind silently un-bills people; `{"force": true}` says you meant it.
+ */
+app.put("/api/settings", async (req, res) => {
+  try {
+    const current = await db.get(
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
+    );
+    if (!current) {
+      res.status(404).json({ error: "Season not configured" });
+      return;
+    }
+
+    const { currentWeek, challengeStartDate, challengeEndDate, isActive, force } = req.body ?? {};
+    const from = Number(current.current_week);
+    const sets = [];
+    const params = [];
+    let to = from;
+
+    if (currentWeek !== undefined) {
+      to = Number(currentWeek);
+      if (!Number.isInteger(to) || to < 1 || to > engine.SEASON_WEEKS) {
+        res.status(400).json({ error: `currentWeek must be a whole number from 1 to ${engine.SEASON_WEEKS}` });
+        return;
+      }
+      if (to < from && force !== true) {
+        res.status(409).json({
+          error:
+            `Refusing to move the season back from week ${from} to week ${to}. Fines are derived from ` +
+            `completed weeks, so rewinding un-bills people. Send {"force": true} to do it anyway.`,
+        });
+        return;
+      }
+      sets.push("current_week = ?");
+      params.push(to);
+    }
+
+    for (const [value, column] of [
+      [challengeStartDate, "challenge_start_date"],
+      [challengeEndDate, "challenge_end_date"],
+    ]) {
+      if (value === undefined) continue;
+      if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        res.status(400).json({ error: `${column} must be a YYYY-MM-DD date` });
+        return;
+      }
+      sets.push(`${column} = ?`);
+      params.push(value);
+    }
+
+    if (isActive !== undefined) {
+      sets.push("is_active = ?");
+      params.push(isActive ? 1 : 0);
+    }
+
+    if (sets.length === 0) {
+      res.status(400).json({ error: "Nothing to update" });
+      return;
+    }
+
+    await db.run(`UPDATE admin_settings SET ${sets.join(", ")} WHERE id = 1`, params);
+
+    // The week that just closed is now scoreable, so bill it. syncFines also
+    // voids anything the move stopped being a miss, which is what makes a forced
+    // rewind honest rather than just cheap.
+    const results = [];
+    if (to !== from) {
+      try {
+        const players = await db.all("SELECT id, name FROM users WHERE standing != 'out'");
+        for (const player of players) {
+          const { issued, voided, state } = await syncFines(player.id);
+          if (issued.length || voided.length) {
+            results.push({ userId: player.id, name: player.name, issued, voided, standing: state.standing });
+          }
+        }
+      } catch (err) {
+        // The clock and the fines have to move together. There is no transaction
+        // to lean on here, so put the week back rather than leave a season that
+        // says week N but was never billed for week N-1.
+        // ponytail: compensating write, not a transaction — good enough for one row.
+        await db.run("UPDATE admin_settings SET current_week = ? WHERE id = 1", [from]);
+        res.status(500).json({ error: `Fine sync failed, season left at week ${from}: ${err.message}` });
+        return;
+      }
+    }
+
+    const row = await db.get(
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
+    );
+    const finesIssued = results.reduce((n, r) => n + r.issued.length, 0);
+    const finesVoided = results.reduce((n, r) => n + r.voided.length, 0);
+    debug(`Season week ${from} -> ${to}: issued ${finesIssued}, voided ${finesVoided} fine(s)`);
+
+    res.json({
+      challengeStartDate: row.challenge_start_date,
+      challengeEndDate: row.challenge_end_date,
+      currentWeek: Number(row.current_week),
+      isActive: Boolean(row.is_active),
+      movedFrom: from,
+      movedTo: Number(row.current_week),
+      finesIssued,
+      finesVoided,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== GOAL PROGRESS ====================
 
 /**
@@ -1379,27 +1799,17 @@ app.get("/api/settings", async (req, res) => {
  * time), otherwise higher is better (a lift). Returns null when the goal has no
  * numbers to measure against.
  */
-function progressFraction(baseline, target, current) {
-  if (baseline == null || target == null || current == null) return null;
-  if (target === baseline) return current >= target ? 1 : 0;
-  const fraction = (current - baseline) / (target - baseline);
-  return Math.max(0, Math.min(1, fraction));
-}
+// The rules engine owns this — the UI draws its bar from the same function, so
+// the server and the board cannot disagree about what "at target" means.
+const progressFraction = engine.goalProgressFraction;
 
 app.get("/api/goals/:id/progress", async (req, res) => {
   try {
     const rows = await db.all(
-      "SELECT id, value, note, recorded_at FROM goal_progress WHERE goal_id = ? ORDER BY recorded_at ASC",
+      "SELECT id, value, note, recorded_at FROM goal_progress WHERE goal_id = ? ORDER BY recorded_at ASC, id ASC",
       [req.params.id]
     );
-    res.json(
-      rows.map((r) => ({
-        id: r.id,
-        value: Number(r.value),
-        note: r.note,
-        recordedAt: r.recorded_at,
-      }))
-    );
+    res.json(rows.map(progressRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1414,14 +1824,35 @@ app.post("/api/goals/:id/progress", async (req, res) => {
       res.status(400).json({ error: "Progress needs a number" });
       return;
     }
+    if (numeric < 0) {
+      res.status(400).json({ error: "Progress can't be negative" });
+      return;
+    }
 
     const goal = await db.get(
-      "SELECT id, user_id, baseline_value, target_value, is_completed FROM goals WHERE id = ?",
+      "SELECT id, user_id, baseline_value, target_value, unit, is_completed FROM goals WHERE id = ?",
       [req.params.id]
     );
     if (!goal) {
       res.status(404).json({ error: "Goal not found" });
       return;
+    }
+
+    if (denyUnlessOwner(req, res, goal.user_id)) return;
+
+    const baseline = goal.baseline_value != null ? Number(goal.baseline_value) : null;
+    const target = goal.target_value != null ? Number(goal.target_value) : null;
+
+    // Ten goal-ranges away from the baseline is a typo, not a reading. Measured
+    // as a fraction of baseline -> target, so it holds whichever way the goal
+    // runs: a lift rises, a 5k time falls.
+    if (baseline != null && target != null && target !== baseline) {
+      if (Math.abs((numeric - baseline) / (target - baseline)) > 10) {
+        res.status(400).json({
+          error: `${numeric} ${goal.unit || ""}`.trim() + " is nowhere near this goal — check the number",
+        });
+        return;
+      }
     }
 
     const recordedAt = new Date().toISOString();
@@ -1432,11 +1863,7 @@ app.post("/api/goals/:id/progress", async (req, res) => {
 
     // Hitting the target completes the goal; the group still has to approve any
     // replacement (Rule 04), so nothing else changes here.
-    const fraction = progressFraction(
-      goal.baseline_value != null ? Number(goal.baseline_value) : null,
-      goal.target_value != null ? Number(goal.target_value) : null,
-      numeric
-    );
+    const fraction = progressFraction(baseline, target, numeric);
     const reached = fraction === 1;
     if (reached && !goal.is_completed) {
       await db.run("UPDATE goals SET is_completed = 1, completed_date = ? WHERE id = ?", [
@@ -1464,7 +1891,7 @@ app.get("/api/feed", async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 40, 100);
     const [users, fines, tokens, goals, progress] = await Promise.all([
       db.all("SELECT id, name, avatar FROM users"),
-      db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines"),
+      db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines WHERE voided_at IS NULL"),
       db.all("SELECT user_id, week, approved_at FROM skip_tokens WHERE approved_at IS NOT NULL"),
       db.all("SELECT id, user_id, description, points, completed_date FROM goals WHERE is_completed = 1"),
       db.all(
@@ -1558,7 +1985,7 @@ async function loadSeason(userId) {
       [userId]
     ),
     db.all("SELECT week FROM skip_tokens WHERE user_id = ? AND approved_at IS NOT NULL", [userId]),
-    db.all("SELECT week, settled_at FROM fines WHERE user_id = ?", [userId]),
+    db.all("SELECT week, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL", [userId]),
     db.get("SELECT current_week FROM admin_settings WHERE id = 1"),
   ]);
 
@@ -1588,17 +2015,55 @@ async function loadSeason(userId) {
  */
 async function syncFines(userId) {
   const { state } = await loadSeason(userId);
-  const existing = await db.all("SELECT week FROM fines WHERE user_id = ?", [userId]);
+  const existing = await db.all(
+    "SELECT id, week, amount, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL",
+    [userId]
+  );
   const known = new Set(existing.map((r) => Number(r.week)));
+
+  // A week that is no longer a miss — logged late, or covered by a token — must
+  // stop being billed. Otherwise the fines list demands money the season doesn't.
+  const stillFined = new Map(state.weeks.filter((w) => w.fine > 0).map((w) => [w.week, w.fine]));
+  const voided = [];
+  for (const row of existing) {
+    const week = Number(row.week);
+    const owedNow = stillFined.get(week);
+
+    if (owedNow == null) {
+      await db.run(
+        "UPDATE fines SET voided_at = ?, voided_reason = ? WHERE id = ?",
+        [
+          new Date().toISOString(),
+          row.settled_at ? "week no longer fined — paid in credit" : "week no longer fined",
+          row.id,
+        ]
+      );
+      voided.push({ week, amount: Number(row.amount), wasSettled: Boolean(row.settled_at) });
+      known.delete(week);
+    } else if (Number(row.amount) !== owedNow && !row.settled_at) {
+      // The price of that week can change when earlier weeks are edited.
+      await db.run("UPDATE fines SET amount = ? WHERE id = ?", [owedNow, row.id]);
+    }
+  }
 
   const issued = [];
   for (const week of state.weeks) {
     if (week.fine <= 0 || known.has(week.week)) continue;
     const now = new Date();
     const due = new Date(now.getTime() + engine.PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
+    // One row per player-week, forever (UNIQUE(user_id, week)). A week that was
+    // voided and then became a miss again — the season moved back and forward,
+    // or a logged day was undone — has to revive that row, not insert a second.
     await db.run(
       `INSERT INTO fines (id, user_id, week, amount, price_level, issued_at, due_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, week) DO UPDATE SET
+         amount = excluded.amount,
+         price_level = excluded.price_level,
+         issued_at = excluded.issued_at,
+         due_at = excluded.due_at,
+         voided_at = NULL,
+         voided_reason = NULL`,
       [uuidv4(), userId, week.week, week.fine, week.priceLevel, now.toISOString(), due.toISOString()]
     );
     issued.push({ week: week.week, amount: week.fine });
@@ -1610,8 +2075,112 @@ async function syncFines(userId) {
     [state.priceLevel, state.cleanWeeks, state.missedWeeks, state.standing, userId]
   );
 
-  return { issued, state };
+  return { issued, voided, state };
 }
+
+/**
+ * The one shape a season is reported in. Both the single-player route and the
+ * batch route build their response here, so they cannot drift apart.
+ */
+function seasonView(user, { state, currentWeek, workoutRows }, unsettled) {
+  return {
+    userId: user.id,
+    name: user.name,
+    currentWeek,
+    priceLevel: state.priceLevel,
+    fineIfMissed: engine.currentFine(state),
+    standing: state.standing,
+    suspendedAtWeek: state.suspendedAtWeek,
+    outAtWeek: state.outAtWeek,
+    cleanWeeks: state.cleanWeeks,
+    missedWeeks: state.missedWeeks,
+    cleanStreak: state.cleanStreak,
+    missesAtLevel: state.missesAtLevel,
+    tokensLeft: engine.MAX_SKIP_TOKENS - state.tokensUsed,
+    billed: state.billed,
+    paid: state.paid,
+    outstanding: state.outstanding,
+    potEligible: state.potEligible,
+    weeks: state.weeks,
+    // Not scored yet — the week is still running.
+    currentWeekProgress: {
+      week: currentWeek,
+      workouts: workoutRows.filter(
+        (r) => Number(r.week) === currentWeek && Boolean(r.is_completed)
+      ).length,
+      needed: engine.WORKOUTS_PER_WEEK,
+    },
+    unsettledFines: unsettled.map((f) => ({
+      id: f.id,
+      week: Number(f.week),
+      amount: Number(f.amount),
+      issuedAt: f.issued_at,
+      dueAt: f.due_at,
+      overdue: new Date(f.due_at) < new Date(),
+    })),
+  };
+}
+
+const groupByUser = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const list = map.get(row.user_id);
+    if (list) list.push(row);
+    else map.set(row.user_id, [row]);
+  }
+  return map;
+};
+
+// Every player's season in one shot. Same objects as /api/season/:userId, but
+// five table reads instead of five per player — Turso charges a round trip each.
+app.get("/api/seasons", async (req, res) => {
+  try {
+    const [users, workoutRows, tokenRows, fineRows, settings] = await Promise.all([
+      db.all("SELECT id, name FROM users ORDER BY name COLLATE NOCASE ASC"),
+      db.all("SELECT user_id, week, day_of_week, is_completed FROM workout_days"),
+      db.all("SELECT user_id, week FROM skip_tokens WHERE approved_at IS NOT NULL"),
+      db.all(
+        `SELECT user_id, id, week, amount, settled_at, issued_at, due_at
+         FROM fines WHERE voided_at IS NULL ORDER BY week DESC`
+      ),
+      db.get("SELECT current_week FROM admin_settings WHERE id = 1"),
+    ]);
+
+    const currentWeek = settings ? Number(settings.current_week) : 1;
+    const completedWeeks = Math.max(0, currentWeek - 1);
+    const workoutsByUser = groupByUser(workoutRows);
+    const tokensByUser = groupByUser(tokenRows);
+    const finesByUser = groupByUser(fineRows);
+
+    res.json(
+      users.map((user) => {
+        const mine = workoutsByUser.get(user.id) || [];
+        const fines = finesByUser.get(user.id) || [];
+
+        const state = engine.runSeason({
+          userId: user.id,
+          workoutDays: mine.map((r) => ({
+            userId: r.user_id,
+            week: Number(r.week),
+            dayOfWeek: Number(r.day_of_week),
+            isCompleted: Boolean(r.is_completed),
+          })),
+          skipWeeks: (tokensByUser.get(user.id) || []).map((r) => Number(r.week)),
+          settledWeeks: fines.filter((r) => r.settled_at).map((r) => Number(r.week)),
+          completedWeeks,
+        });
+
+        return seasonView(
+          user,
+          { state, currentWeek, workoutRows: mine },
+          fines.filter((f) => !f.settled_at)
+        );
+      })
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Full derived state for one player: what a miss costs, what they owe, where they stand.
 app.get("/api/season/:userId", async (req, res) => {
@@ -1622,48 +2191,14 @@ app.get("/api/season/:userId", async (req, res) => {
       return;
     }
 
-    const { state, currentWeek, workoutRows } = await loadSeason(req.params.userId);
+    const season = await loadSeason(req.params.userId);
     const unsettled = await db.all(
-      "SELECT id, week, amount, issued_at, due_at FROM fines WHERE user_id = ? AND settled_at IS NULL ORDER BY week DESC",
+      `SELECT id, week, amount, issued_at, due_at FROM fines
+       WHERE user_id = ? AND settled_at IS NULL AND voided_at IS NULL ORDER BY week DESC`,
       [req.params.userId]
     );
 
-    res.json({
-      userId: user.id,
-      name: user.name,
-      currentWeek,
-      priceLevel: state.priceLevel,
-      fineIfMissed: engine.currentFine(state),
-      standing: state.standing,
-      suspendedAtWeek: state.suspendedAtWeek,
-      outAtWeek: state.outAtWeek,
-      cleanWeeks: state.cleanWeeks,
-      missedWeeks: state.missedWeeks,
-      cleanStreak: state.cleanStreak,
-      missesAtLevel: state.missesAtLevel,
-      tokensLeft: engine.MAX_SKIP_TOKENS - state.tokensUsed,
-      billed: state.billed,
-      paid: state.paid,
-      outstanding: state.outstanding,
-      potEligible: state.potEligible,
-      weeks: state.weeks,
-      // Not scored yet — the week is still running.
-      currentWeekProgress: {
-        week: currentWeek,
-        workouts: workoutRows.filter(
-          (r) => Number(r.week) === currentWeek && Boolean(r.is_completed)
-        ).length,
-        needed: engine.WORKOUTS_PER_WEEK,
-      },
-      unsettledFines: unsettled.map((f) => ({
-        id: f.id,
-        week: Number(f.week),
-        amount: Number(f.amount),
-        issuedAt: f.issued_at,
-        dueAt: f.due_at,
-        overdue: new Date(f.due_at) < new Date(),
-      })),
-    });
+    res.json(seasonView(user, season, unsettled));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1678,13 +2213,14 @@ app.post("/api/fines/sync", async (req, res) => {
 
     const results = [];
     for (const userId of userIds) {
-      const { issued, state } = await syncFines(userId);
-      results.push({ userId, issued, standing: state.standing, outstanding: state.outstanding });
+      const { issued, voided, state } = await syncFines(userId);
+      results.push({ userId, issued, voided, standing: state.standing, outstanding: state.outstanding });
     }
 
     const total = results.reduce((n, r) => n + r.issued.length, 0);
-    debug(`Fine sync issued ${total} new fine(s) across ${userIds.length} player(s)`);
-    res.json({ players: results.length, finesIssued: total, results });
+    const retired = results.reduce((n, r) => n + r.voided.length, 0);
+    debug(`Fine sync issued ${total} and voided ${retired} across ${userIds.length} player(s)`);
+    res.json({ players: results.length, finesIssued: total, finesVoided: retired, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1700,6 +2236,7 @@ app.get("/api/fines", async (req, res) => {
       params.push(userId);
     }
     if (unsettled === "true") clauses.push("settled_at IS NULL");
+    clauses.push("voided_at IS NULL");
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
     const rows = await db.all(
@@ -1734,6 +2271,8 @@ app.post("/api/fines/:id/settle", async (req, res) => {
       res.status(404).json({ error: "Fine not found" });
       return;
     }
+    if (denyUnlessOwner(req, res, fine.user_id)) return;
+    if (await denyIfOut(res, fine.user_id)) return;
     if (fine.settled_at) {
       res.status(409).json({ error: "Fine already settled" });
       return;
@@ -1756,13 +2295,15 @@ app.post("/api/skip-tokens", async (req, res) => {
       res.status(400).json({ error: "userId and week are required" });
       return;
     }
+    if (denyUnlessOwner(req, res, userId)) return;
+    if (await denyIfOut(res, userId)) return;
 
     const used = await db.all(
       "SELECT week FROM skip_tokens WHERE user_id = ? AND approved_at IS NOT NULL",
       [userId]
     );
     const settings = await db.get("SELECT current_week FROM admin_settings WHERE id = 1");
-    const seasonWeeks = 24;
+    const seasonWeeks = engine.SEASON_WEEKS;
 
     const blocker = engine.skipTokenBlocker(
       Number(week),
