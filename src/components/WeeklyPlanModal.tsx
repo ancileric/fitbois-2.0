@@ -98,20 +98,20 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+      <div className="bg-paper-card rounded-xl p-6 w-full max-w-md shadow-xl">
         <div className="flex items-start justify-between mb-2">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-ink">
               Week {week} Plan — {user.name}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               Commit to at least{" "}
               {required} days
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-ink-faint hover:text-ink-muted"
             aria-label="Close"
           >
             <X size={20} />
@@ -119,7 +119,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
         </div>
 
         {isLocked && (
-          <div className="mt-3 mb-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+          <div className="mt-3 mb-3 flex items-start gap-2 bg-skip-50 border border-skip-100 rounded-lg px-3 py-2 text-xs text-skip-700">
             <Lock size={14} className="mt-0.5 shrink-0" />
             <span>{lockMessage}</span>
           </div>
@@ -127,15 +127,15 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
 
 
         {isLocked && onSwap && existingPlan ? (
-          <div className="mt-3 border-t border-gray-100 pt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+          <div className="mt-3 border-t border-line-soft pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted mb-2">
               Swap a session {swapsUsed >= 1 ? "— spent for this week" : "— one a week"}
             </p>
             {swapsUsed >= 1 ? (
-              <p className="text-sm text-gray-500">You've already swapped this week.</p>
+              <p className="text-sm text-ink-muted">You've already swapped this week.</p>
             ) : (
               <>
-                <p className="text-sm text-gray-600 mb-2">
+                <p className="text-sm text-ink-muted mb-2">
                   {swapFrom
                     ? `Moving ${DAY_NAMES[swapFrom - 1]} to…`
                     : "Pick the committed day you're moving."}
@@ -163,7 +163,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
                         className={`w-10 h-9 rounded-lg text-xs font-semibold border ${
                           swapFrom === dow
                             ? "border-primary-500 bg-primary-50 text-primary-700"
-                            : "border-gray-200 text-gray-700"
+                            : "border-line text-ink"
                         } disabled:opacity-30 disabled:cursor-not-allowed`}
                       >
                         {DAY_NAMES[dow - 1].slice(0, 2)}
@@ -171,18 +171,18 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
                     );
                   })}
                 </div>
-                {swapNotice ? <p className="text-sm text-gray-700 mt-2">{swapNotice}</p> : null}
+                {swapNotice ? <p className="text-sm text-ink mt-2">{swapNotice}</p> : null}
               </>
             )}
           </div>
         ) : null}
 
         {!isLocked && (
-          <p className="text-sm text-gray-600 mb-4 mt-3">
+          <p className="text-sm text-ink-muted mb-4 mt-3">
             Pick the days you'll hit. Hit every committed day to earn{" "}
             <span className="font-semibold text-primary-600">+1 point</span>{" "}
             for the week. Miss any of them and you{" "}
-            <span className="font-semibold text-red-600">lose 1 point</span>.
+            <span className="font-semibold text-owed-600">lose 1 point</span>.
           </p>
         )}
 
@@ -198,14 +198,14 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
                 disabled={!canEdit}
                 className={`flex flex-col items-center py-2 rounded-lg border text-xs transition-colors ${
                   isSelected
-                    ? "bg-primary-500 border-primary-500 text-white"
-                    : "bg-white border-gray-200 text-gray-700 hover:border-primary-300"
+                    ? "bg-primary-500 border-primary-500 text-paper"
+                    : "bg-paper-card border-line text-ink hover:border-primary-300"
                 } ${!canEdit ? "opacity-60 cursor-not-allowed" : ""}`}
               >
                 <span className="font-semibold">{label}</span>
                 <span
                   className={`mt-0.5 ${
-                    isSelected ? "text-white/90" : "text-gray-400"
+                    isSelected ? "text-paper/90" : "text-ink-faint"
                   }`}
                 >
                   {weekDates[idx]
@@ -217,7 +217,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
           })}
         </div>
 
-        <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
+        <div className="mt-4 flex items-center gap-2 text-xs text-ink-muted">
           <Calendar size={14} />
           <span>
             {selectedCount} / {required}+ days selected
@@ -232,7 +232,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="border border-gray-200 text-gray-700 rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
+            className="border border-line text-ink rounded-lg px-4 py-2 text-sm hover:bg-paper-sunk"
           >
             {isLocked ? "Close" : "Cancel"}
           </button>
@@ -240,7 +240,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
             <button
               onClick={handleSubmit}
               disabled={!canSave || submitting}
-              className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${
+              className={`rounded-lg px-4 py-2 text-sm font-medium text-paper ${
                 canSave && !submitting
                   ? "bg-primary-500 hover:bg-primary-600"
                   : "bg-gray-300 cursor-not-allowed"

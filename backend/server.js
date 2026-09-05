@@ -18,7 +18,16 @@ const debug = isProduction ? () => {} : console.log;
 const corsOptions = {
   origin: isProduction
     ? process.env.FRONTEND_URL || true
-    : ["http://localhost:3000", "http://127.0.0.1:3000"],
+    : // Dev also serves phones on the same wifi, so allow private-network origins.
+      (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const allowed =
+          /^http:\/\/localhost:\d+$/.test(origin) ||
+          /^http:\/\/127\.0\.0\.1:\d+$/.test(origin) ||
+          /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) ||
+          /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin);
+        callback(allowed ? null : new Error("Origin not allowed"), allowed);
+      },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -68,12 +77,20 @@ async function runDatabaseInit() {
   }
 
   // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
-  try {
-    await db.exec("ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0");
-    console.log("✅ Added weekly_plans.swaps_used");
-  } catch (err) {
-    if (!String(err.message).includes("duplicate column")) {
-      console.error("Migration note:", err.message);
+  // CREATE TABLE IF NOT EXISTS won't add columns to a table that already exists.
+  const addColumns = [
+    "ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE goals ADD COLUMN baseline_value REAL",
+    "ALTER TABLE goals ADD COLUMN target_value REAL",
+    "ALTER TABLE goals ADD COLUMN unit TEXT",
+  ];
+  for (const sql of addColumns) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      if (!String(err.message).includes("duplicate column")) {
+        console.error("Migration note:", err.message);
+      }
     }
   }
 
@@ -720,6 +737,9 @@ app.get("/api/goals", async (req, res) => {
       points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
@@ -752,6 +772,9 @@ app.get("/api/goals/user/:userId", async (req, res) => {
       points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
@@ -788,6 +811,9 @@ app.get("/api/goals/:id", async (req, res) => {
       points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
@@ -803,7 +829,7 @@ app.get("/api/goals/:id", async (req, res) => {
 });
 
 app.post("/api/goals", async (req, res) => {
-  const { userId, category, description, points, baseline, target } = req.body;
+  const { userId, category, description, points, baseline, target, baselineValue, targetValue, unit } = req.body;
 
   debug("Goal creation request:", { userId, category, description, points });
 
@@ -867,8 +893,9 @@ app.post("/api/goals", async (req, res) => {
     await db.run(
       `INSERT INTO goals (
         id, user_id, category, description, points, baseline, target,
+        baseline_value, target_value, unit,
         is_completed, completed_date, created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         userId,
@@ -877,6 +904,9 @@ app.post("/api/goals", async (req, res) => {
         wanted,
         baseline || null,
         target || null,
+        Number.isFinite(Number(baselineValue)) ? Number(baselineValue) : null,
+        Number.isFinite(Number(targetValue)) ? Number(targetValue) : null,
+        unit ? String(unit).slice(0, 20) : null,
         0,
         null,
         createdDate,
@@ -991,6 +1021,9 @@ app.put("/api/goals/:id", async (req, res) => {
       points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
@@ -1317,6 +1350,201 @@ app.post("/api/weekly-plans/:userId/:week/swap", async (req, res) => {
   }
 });
 
+app.get("/api/settings", async (req, res) => {
+  try {
+    const row = await db.get(
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
+    );
+    if (!row) {
+      res.status(404).json({ error: "Season not configured" });
+      return;
+    }
+    res.json({
+      challengeStartDate: row.challenge_start_date,
+      challengeEndDate: row.challenge_end_date,
+      currentWeek: Number(row.current_week),
+      isActive: Boolean(row.is_active),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GOAL PROGRESS ====================
+
+/**
+ * How far along a goal is, as a fraction of the distance from baseline to target.
+ *
+ * Direction is inferred: a target below the baseline means lower is better (a 5k
+ * time), otherwise higher is better (a lift). Returns null when the goal has no
+ * numbers to measure against.
+ */
+function progressFraction(baseline, target, current) {
+  if (baseline == null || target == null || current == null) return null;
+  if (target === baseline) return current >= target ? 1 : 0;
+  const fraction = (current - baseline) / (target - baseline);
+  return Math.max(0, Math.min(1, fraction));
+}
+
+app.get("/api/goals/:id/progress", async (req, res) => {
+  try {
+    const rows = await db.all(
+      "SELECT id, value, note, recorded_at FROM goal_progress WHERE goal_id = ? ORDER BY recorded_at ASC",
+      [req.params.id]
+    );
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        value: Number(r.value),
+        note: r.note,
+        recordedAt: r.recorded_at,
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Progress is appended, never overwritten — the history is the evidence Rule 01 asks for.
+app.post("/api/goals/:id/progress", async (req, res) => {
+  try {
+    const { value, note } = req.body;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      res.status(400).json({ error: "Progress needs a number" });
+      return;
+    }
+
+    const goal = await db.get(
+      "SELECT id, user_id, baseline_value, target_value, is_completed FROM goals WHERE id = ?",
+      [req.params.id]
+    );
+    if (!goal) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+
+    const recordedAt = new Date().toISOString();
+    await db.run(
+      "INSERT INTO goal_progress (id, goal_id, user_id, value, note, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [uuidv4(), req.params.id, goal.user_id, numeric, note ? String(note).slice(0, 200) : null, recordedAt]
+    );
+
+    // Hitting the target completes the goal; the group still has to approve any
+    // replacement (Rule 04), so nothing else changes here.
+    const fraction = progressFraction(
+      goal.baseline_value != null ? Number(goal.baseline_value) : null,
+      goal.target_value != null ? Number(goal.target_value) : null,
+      numeric
+    );
+    const reached = fraction === 1;
+    if (reached && !goal.is_completed) {
+      await db.run("UPDATE goals SET is_completed = 1, completed_date = ? WHERE id = ?", [
+        recordedAt.split("T")[0],
+        req.params.id,
+      ]);
+    }
+
+    res.status(201).json({ value: numeric, recordedAt, progress: fraction, completed: reached });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GROUP FEED ====================
+
+/**
+ * What has happened in the season, newest first.
+ *
+ * Assembled from the records themselves rather than a written-to event log, so
+ * the feed can never claim something the data doesn't support.
+ */
+app.get("/api/feed", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 40, 100);
+    const [users, fines, tokens, goals, progress] = await Promise.all([
+      db.all("SELECT id, name, avatar FROM users"),
+      db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines"),
+      db.all("SELECT user_id, week, approved_at FROM skip_tokens WHERE approved_at IS NOT NULL"),
+      db.all("SELECT id, user_id, description, points, completed_date FROM goals WHERE is_completed = 1"),
+      db.all(
+        `SELECT p.user_id, p.value, p.recorded_at, g.description, g.unit, g.baseline_value, g.target_value
+         FROM goal_progress p JOIN goals g ON g.id = p.goal_id
+         ORDER BY p.recorded_at DESC LIMIT 60`
+      ),
+    ]);
+
+    const nameOf = new Map(users.map((u) => [u.id, u.name]));
+    const events = [];
+
+    for (const f of fines) {
+      events.push({
+        kind: "fine",
+        userId: f.user_id,
+        name: nameOf.get(f.user_id),
+        at: f.issued_at,
+        text: `missed week ${f.week} — ₹${Number(f.amount).toLocaleString("en-IN")}`,
+        amount: Number(f.amount),
+      });
+      if (f.settled_at) {
+        events.push({
+          kind: "payment",
+          userId: f.user_id,
+          name: nameOf.get(f.user_id),
+          at: f.settled_at,
+          text: `paid ₹${Number(f.amount).toLocaleString("en-IN")} for week ${f.week}`,
+          amount: Number(f.amount),
+        });
+      }
+    }
+
+    for (const t of tokens) {
+      events.push({
+        kind: "token",
+        userId: t.user_id,
+        name: nameOf.get(t.user_id),
+        at: t.approved_at,
+        text: `used a skip token for week ${t.week}`,
+      });
+    }
+
+    for (const g of goals) {
+      events.push({
+        kind: "goal",
+        userId: g.user_id,
+        name: nameOf.get(g.user_id),
+        at: g.completed_date ? `${g.completed_date}T12:00:00.000Z` : null,
+        text: `completed "${g.description}" (${g.points} pt${g.points > 1 ? "s" : ""})`,
+      });
+    }
+
+    for (const p of progress) {
+      const fraction = progressFraction(
+        p.baseline_value != null ? Number(p.baseline_value) : null,
+        p.target_value != null ? Number(p.target_value) : null,
+        Number(p.value)
+      );
+      events.push({
+        kind: "progress",
+        userId: p.user_id,
+        name: nameOf.get(p.user_id),
+        at: p.recorded_at,
+        text: `logged ${p.value}${p.unit ? ` ${p.unit}` : ""} on "${p.description}"`,
+        progress: fraction,
+      });
+    }
+
+    const ordered = events
+      .filter((e) => e.at && e.name)
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, limit);
+
+    res.json(ordered);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== SEASON, FINES & SKIP TOKENS ====================
 
 /**
@@ -1351,7 +1579,7 @@ async function loadSeason(userId) {
     completedWeeks: Math.max(0, currentWeek - 1),
   });
 
-  return { state, currentWeek };
+  return { state, currentWeek, workoutRows };
 }
 
 /**
@@ -1394,7 +1622,7 @@ app.get("/api/season/:userId", async (req, res) => {
       return;
     }
 
-    const { state, currentWeek } = await loadSeason(req.params.userId);
+    const { state, currentWeek, workoutRows } = await loadSeason(req.params.userId);
     const unsettled = await db.all(
       "SELECT id, week, amount, issued_at, due_at FROM fines WHERE user_id = ? AND settled_at IS NULL ORDER BY week DESC",
       [req.params.userId]
@@ -1419,6 +1647,14 @@ app.get("/api/season/:userId", async (req, res) => {
       outstanding: state.outstanding,
       potEligible: state.potEligible,
       weeks: state.weeks,
+      // Not scored yet — the week is still running.
+      currentWeekProgress: {
+        week: currentWeek,
+        workouts: workoutRows.filter(
+          (r) => Number(r.week) === currentWeek && Boolean(r.is_completed)
+        ).length,
+        needed: engine.WORKOUTS_PER_WEEK,
+      },
       unsettledFines: unsettled.map((f) => ({
         id: f.id,
         week: Number(f.week),

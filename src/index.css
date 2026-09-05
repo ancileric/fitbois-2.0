@@ -2,23 +2,109 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * One palette, two grounds. Dark is not an inversion: the greens, rusts and
+ * ambers are re-picked so each still reads as itself against a dark surface,
+ * and every pairing clears WCAG AA.
+ */
+:root {
+  --paper: 244 243 239;
+  --paper-card: 255 255 255;
+  --paper-sunk: 236 234 228;
+  --ink: 27 29 25;
+  --ink-muted: 83 87 79;
+  --ink-faint: 99 103 95;
+  --line: 226 222 214;
+  --line-soft: 238 235 228;
+  --clean-50: 232 242 236;
+  --clean-100: 211 231 220;
+  --clean-500: 47 111 78;
+  --clean-600: 38 92 64;
+  --clean-700: 29 72 49;
+  --owed-50: 248 233 228;
+  --owed-100: 242 217 209;
+  --owed-500: 168 58 30;
+  --owed-600: 140 47 24;
+  --owed-700: 111 37 18;
+  --skip-50: 249 239 219;
+  --skip-100: 243 227 194;
+  --skip-500: 154 107 18;
+  --skip-600: 128 88 14;
+  --skip-700: 101 70 11;
+  --shadow: 27 29 25;
+  color-scheme: light;
+}
+
+.dark {
+  --paper: 20 22 26;
+  --paper-card: 27 30 34;
+  --paper-sunk: 35 39 44;
+  --ink: 233 234 230;
+  --ink-muted: 168 176 168;
+  --ink-faint: 152 160 154;
+  --line: 44 48 55;
+  --line-soft: 35 39 44;
+  --clean-50: 24 43 34;
+  --clean-100: 31 58 44;
+  --clean-500: 92 180 137;
+  --clean-600: 124 199 161;
+  --clean-700: 154 217 184;
+  --owed-50: 44 29 24;
+  --owed-100: 58 33 26;
+  --owed-500: 232 131 106;
+  --owed-600: 240 160 139;
+  --owed-700: 245 184 167;
+  --skip-50: 42 34 20;
+  --skip-100: 58 46 20;
+  --skip-500: 224 169 74;
+  --skip-600: 236 192 114;
+  --skip-700: 242 209 151;
+  --shadow: 0 0 0;
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  font-family:
-    "Montserrat",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Roboto",
-    "Oxygen",
-    "Ubuntu",
-    "Cantarell",
-    "Fira Sans",
-    "Droid Sans",
-    "Helvetica Neue",
-    sans-serif;
+  font-family: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Money and weeks are read in columns, so the digits have to line up. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Big condensed caps read too loose at display size. */
+.display {
+  font-family: "Barlow Condensed", Impact, "Arial Narrow", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 1.02;
+}
+
+::selection {
+  background: rgb(var(--clean-500));
+  color: rgb(var(--paper));
+}
+
+html {
+  accent-color: rgb(var(--clean-500));
+  caret-color: rgb(var(--clean-500));
+  scrollbar-color: rgb(var(--ink-faint) / 0.5) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 code {

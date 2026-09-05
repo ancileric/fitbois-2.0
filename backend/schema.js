@@ -27,11 +27,24 @@ const DDL = `
     points INTEGER NOT NULL DEFAULT 1,
     baseline TEXT,
     target TEXT,
+    baseline_value REAL,
+    target_value REAL,
+    unit TEXT,
     approved_at TEXT,
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     completed_date TEXT,
     created_date TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS goal_progress (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    value REAL NOT NULL,
+    note TEXT,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS workout_days (
@@ -107,6 +120,7 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id);
   CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week);
   CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id);
+  CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON goal_progress (goal_id, recorded_at);
   CREATE INDEX IF NOT EXISTS idx_fines_user ON fines (user_id);
   CREATE INDEX IF NOT EXISTS idx_fines_unsettled ON fines (user_id, settled_at);
   CREATE INDEX IF NOT EXISTS idx_skip_tokens_user ON skip_tokens (user_id);

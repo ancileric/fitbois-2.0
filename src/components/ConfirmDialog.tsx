@@ -26,23 +26,23 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
+      <div className="bg-paper-card rounded-xl p-6 w-full max-w-sm shadow-xl">
         <div className="flex items-start gap-4">
           {isDestructive && (
-            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-owed-100 flex items-center justify-center">
+              <AlertTriangle className="w-5 h-5 text-owed-600" />
             </div>
           )}
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-            <p className="mt-2 text-sm text-gray-600">{message}</p>
+            <h3 className="text-lg font-semibold text-ink">{title}</h3>
+            <p className="mt-2 text-sm text-ink-muted">{message}</p>
           </div>
         </div>
 
         <div className="flex gap-3 mt-6">
           <button
             onClick={onCancel}
-            className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+            className="flex-1 px-4 py-2.5 border border-line text-ink rounded-lg font-medium hover:bg-paper-sunk transition-colors"
           >
             {cancelLabel}
           </button>
@@ -50,8 +50,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onConfirm}
             className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
               isDestructive
-                ? "bg-red-500 text-white hover:bg-red-600"
-                : "bg-primary-500 text-white hover:bg-primary-600"
+                ? "bg-owed-500 text-paper hover:bg-owed-600"
+                : "bg-primary-500 text-paper hover:bg-primary-600"
             }`}
           >
             {confirmLabel}

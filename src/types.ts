@@ -39,6 +39,10 @@ export interface Goal {
   baseline?: string;
   /** What counts as completing it. */
   target?: string;
+  /** Where you started and what counts as done, as numbers. */
+  baselineValue?: number;
+  targetValue?: number;
+  unit?: string;
   /** A goal is live once the group signs off. */
   approvedAt?: string;
   isCompleted: boolean;

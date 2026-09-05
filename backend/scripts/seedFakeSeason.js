@@ -22,7 +22,7 @@ const MISS = 2; // short of the 5 needed
  * skips   — weeks covered by an approved skip token
  * pays    — "all" settles every fine, "none" settles nothing,
  *           or an array of the weeks whose fines get settled
- * goals   — [points, description, category, completed?, approved?]
+ * goals   — [points, description, category, completed?, approved?, baseline, target, unit]
  */
 const PLAYERS = [
   {
@@ -34,8 +34,8 @@ const PLAYERS = [
     skips: [],
     pays: "all",
     goals: [
-      [3, "Deadlift 100kg", "strength", true, true],
-      [3, "Half marathon under 2h", "endurance", false, true],
+      [3, "Deadlift 100kg", "strength", true, true, 70, 100, "kg"],
+      [3, "Half marathon under 2h", "endurance", false, true, 150, 120, "min"],
     ],
   },
   {
@@ -47,9 +47,9 @@ const PLAYERS = [
     skips: [],
     pays: "none",
     goals: [
-      [2, "Bench 80kg for 5", "strength", false, true],
-      [2, "Swim 1km non-stop", "cardio", false, true],
-      [2, "Play squash 15 times", "sports", false, true],
+      [2, "Bench 80kg for 5", "strength", false, true, 60, 80, "kg"],
+      [2, "Swim 1km non-stop", "cardio", false, true, 300, 1000, "m"],
+      [2, "Play squash 15 times", "sports", false, true, 0, 15, "games"],
     ],
   },
   {
@@ -61,9 +61,9 @@ const PLAYERS = [
     skips: [],
     pays: "none",
     goals: [
-      [1, "Run 5k every week", "cardio", true, true],
-      [1, "20 pull-ups in a set", "strength", true, true],
-      [1, "Cycle 200km total", "endurance", false, true],
+      [1, "Run 5k every week", "cardio", true, true, 0, 10, "runs"],
+      [1, "20 pull-ups in a set", "strength", true, true, 8, 20, "reps"],
+      [1, "Cycle 200km total", "endurance", false, true, 0, 200, "km"],
       [1, "Yoga 30 sessions", "mobility", false, true],
       [1, "Plank 3 minutes", "core", false, true],
       [1, "Climb 20 routes", "sports", false, true],
@@ -78,8 +78,8 @@ const PLAYERS = [
     skips: [],
     pays: "all",
     goals: [
-      [3, "Squat bodyweight x10", "strength", true, true],
-      [2, "Sub-25 minute 5k", "cardio", true, true],
+      [3, "Squat bodyweight x10", "strength", true, true, 4, 10, "reps"],
+      [2, "Sub-25 minute 5k", "cardio", true, true, 31, 25, "min"],
       [1, "Box 12 sessions", "sports", true, true],
     ],
   },
@@ -92,7 +92,7 @@ const PLAYERS = [
     skips: [],
     pays: "all",
     goals: [
-      [3, "Muscle-up unassisted", "strength", false, true],
+      [3, "Muscle-up unassisted", "strength", false, true, 0, 1, "reps"],
       [1, "Walk 10k steps daily", "consistency", false, true],
       [1, "Stretch every morning", "mobility", false, true],
       [1, "Badminton 20 games", "sports", false, true],
@@ -107,8 +107,8 @@ const PLAYERS = [
     skips: [],
     pays: "all",
     goals: [
-      [2, "Row 2km under 8 minutes", "cardio", true, true],
-      [2, "Overhead press 50kg", "strength", false, true],
+      [2, "Row 2km under 8 minutes", "cardio", true, true, 9.5, 8, "min"],
+      [2, "Overhead press 50kg", "strength", false, true, 35, 50, "kg"],
       [1, "Football 25 games", "sports", false, true],
       [1, "Sleep-free rest days logged", "consistency", false, true],
     ],
@@ -138,7 +138,7 @@ const PLAYERS = [
     skips: [2, 3, 6],
     pays: "all",
     goals: [
-      [3, "Lead climb 6b", "sports", false, true],
+      [3, "Lead climb 6b", "sports", false, true, 0, 6, "grade"],
       [1, "Hangboard 3x a week", "strength", false, true],
     ],
   },
@@ -151,7 +151,7 @@ const PLAYERS = [
     skips: [2],
     pays: [4],
     goals: [
-      [3, "Swim 100 lengths", "endurance", false, false],
+      [3, "Swim 100 lengths", "endurance", false, false, 20, 100, "lengths"],
       [3, "Bench bodyweight", "strength", false, false],
     ],
   },
@@ -170,7 +170,7 @@ const workoutRowsFor = (player) => {
 async function seed() {
   await db.execMultiple(DDL);
 
-  for (const table of ["fines", "skip_tokens", "workout_days", "goals", "users"]) {
+  for (const table of ["goal_progress", "fines", "skip_tokens", "workout_days", "goals", "users"]) {
     await db.run(`DELETE FROM ${table}`);
   }
   await db.run("DELETE FROM admin_settings");
@@ -182,6 +182,7 @@ async function seed() {
   );
 
   const summary = [];
+  const progressRows = [];
 
   for (const player of PLAYERS) {
     await db.run(
@@ -243,23 +244,53 @@ async function seed() {
       [state.priceLevel, state.cleanWeeks, state.missedWeeks, state.standing, player.id]
     );
 
-    for (const [points, description, category, completed, approved] of player.goals) {
+    for (const goal of player.goals) {
+      const [points, description, category, completed, approved, baselineValue, targetValue, unit] = goal;
+      const goalId = uuidv4();
       await db.run(
-        `INSERT INTO goals (id, user_id, category, description, points, target, approved_at, is_completed, completed_date, created_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO goals (id, user_id, category, description, points, baseline, target,
+          baseline_value, target_value, unit, approved_at, is_completed, completed_date, created_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          uuidv4(),
+          goalId,
           player.id,
           category,
           description,
           points,
-          "see Week 0 baseline",
+          baselineValue != null ? `${baselineValue}${unit ? ` ${unit}` : ""}` : null,
+          targetValue != null ? `${targetValue}${unit ? ` ${unit}` : ""}` : null,
+          baselineValue ?? null,
+          targetValue ?? null,
+          unit ?? null,
           approved ? "2026-01-18" : null,
           completed ? 1 : 0,
           completed ? "2026-03-01" : null,
           "2026-01-18",
         ]
       );
+
+      // A couple of dated updates each, so the progress bars and the feed have history.
+      if (baselineValue != null && targetValue != null) {
+        // Vary per goal, or every player looks identically far along.
+        const spread = [
+          [0.2, 0.45], [0.35, 0.7], [0.1, 0.3], [0.5, 0.85], [0.15, 0.6], [0.4, 0.62],
+        ][(description.length + points) % 6];
+        const steps = completed ? [0.6, 1] : spread;
+        steps.forEach((fraction, i) => {
+          // Reps, games and lengths are counted, not measured — no half a pull-up.
+          const countable = ["reps", "games", "runs", "lengths", "grade"].includes(unit);
+          const raw = baselineValue + (targetValue - baselineValue) * fraction;
+          const value = countable ? Math.round(raw) : Math.round(raw * 10) / 10;
+          progressRows.push([
+            uuidv4(),
+            goalId,
+            player.id,
+            value,
+            null,
+            new Date(Date.UTC(2026, 2 + i * 2, 12 + i * 3)).toISOString(),
+          ]);
+        });
+      }
     }
 
     const spent = player.goals.reduce((sum, g) => sum + g[0], 0);
@@ -275,6 +306,13 @@ async function seed() {
       pot: state.potEligible ? "IN" : "OUT",
       goals: `${player.goals.map((g) => g[0]).join("+")} = ${spent}${spent === 6 ? "" : " (incomplete)"}`,
     });
+  }
+
+  for (const row of progressRows) {
+    await db.run(
+      "INSERT INTO goal_progress (id, goal_id, user_id, value, note, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+      row
+    );
   }
 
   console.log(`\n✅ Seeded ${PLAYERS.length} players across ${WEEKS_PLAYED} completed weeks\n`);

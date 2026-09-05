@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { User, WorkoutDay, WeeklyPlan, AdminSettings, WORKOUTS_PER_WEEK } from "../types";
+import { FINE_BY_LEVEL } from "../utils/seasonEngine";
 import {
   CheckCircle,
   XCircle,
@@ -40,7 +41,9 @@ const Workout: React.FC<WorkoutProps> = ({
 }) => {
   const [planModalUserId, setPlanModalUserId] = useState<string | null>(null);
   // Calculate current week first so we can use it for initial state
-  const currentWeek = getCurrentWeek(adminSettings.challengeStartDate);
+  // The season's week is decided by the server, not by counting days here — the
+  // two used to disagree (week 33 on this screen, week 11 on the season board).
+  const currentWeek = adminSettings.currentWeek;
   const [selectedWeek, setSelectedWeek] = useState(() =>
     currentWeek > 0 ? currentWeek : 1,
   );
@@ -330,19 +333,19 @@ const Workout: React.FC<WorkoutProps> = ({
     <div className="space-y-4">
       {/* Header with inline stats */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Workouts</h1>
-        <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
+        <h1 className="text-2xl font-bold text-ink">Workouts</h1>
+        <div className="mt-4 bg-paper-card rounded-xl p-4 border border-line-soft">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-600">
+                <Users className="w-4 h-4 text-ink-faint" />
+                <span className="text-sm text-ink-muted">
                   {users.filter((u) => u.isActive).length} active
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-600">
+                <Calendar className="w-4 h-4 text-ink-faint" />
+                <span className="text-sm text-ink-muted">
                   {currentWeek <= 0
                     ? `Starts in ${getDaysUntilStart(adminSettings.challengeStartDate)} days`
                     : `Week ${currentWeek}`}
@@ -350,7 +353,7 @@ const Workout: React.FC<WorkoutProps> = ({
               </div>
             </div>
             {currentWeek > 0 && weeklyStats[Math.max(0, currentWeek - 1)] && (
-              <span className="text-sm font-medium text-gray-900">
+              <span className="text-sm font-medium text-ink">
                 {weeklyStats[
                   Math.max(0, currentWeek - 1)
                 ].completionRate.toFixed(0)}
@@ -362,17 +365,17 @@ const Workout: React.FC<WorkoutProps> = ({
       </div>
 
       {/* Workout Tracking Grid */}
-      <div className="bg-white rounded-xl p-4 border border-gray-100">
+      <div className="bg-paper-card rounded-xl p-4 border border-line-soft">
         {/* Week Selector Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-ink">
             Week {selectedWeek}
           </h2>
           <div className="relative">
             <select
               value={selectedWeek}
               onChange={(e) => setSelectedWeek(Number(e.target.value))}
-              className="appearance-none bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
+              className="appearance-none bg-paper-sunk border border-line rounded-lg px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
             >
               {weeks.map((week) => {
                 const stats = weeklyStats[week - 1];
@@ -386,7 +389,7 @@ const Workout: React.FC<WorkoutProps> = ({
                 );
               })}
             </select>
-            <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-ink-faint pointer-events-none" />
           </div>
         </div>
 
@@ -403,8 +406,8 @@ const Workout: React.FC<WorkoutProps> = ({
                   key={user.id}
                   className={`p-4 rounded-lg border ${
                     weekStats.isComplete
-                      ? "bg-green-50 border-green-200"
-                      : "bg-gray-50 border-gray-200"
+                      ? "bg-clean-50 border-green-200"
+                      : "bg-paper-sunk border-line"
                   }`}
                 >
                   {/* User Info Row */}
@@ -415,15 +418,15 @@ const Workout: React.FC<WorkoutProps> = ({
                       </div>
                       <div>
                         <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-900">
+                          <span className="font-medium text-ink">
                             {user.name}
                           </span>
                           {weekStats.isComplete && (
-                            <span className="text-green-600">✅</span>
+                            <span className="text-clean-600">✅</span>
                           )}
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {WORKOUTS_PER_WEEK} a week •{" "}
+                        <div className="text-xs text-ink-muted">
+                          ₹{(FINE_BY_LEVEL[user.priceLevel] ?? 500).toLocaleString("en-IN")} a miss •{" "}
                           {user.cleanWeeks} clean weeks
                         </div>
                       </div>
@@ -431,8 +434,8 @@ const Workout: React.FC<WorkoutProps> = ({
                     <div
                       className={`text-sm font-bold ${
                         weekStats.isComplete
-                          ? "text-green-600"
-                          : "text-gray-600"
+                          ? "text-clean-600"
+                          : "text-ink-muted"
                       }`}
                     >
                       {weekStats.completed}/{weekStats.required}
@@ -447,7 +450,7 @@ const Workout: React.FC<WorkoutProps> = ({
                                         const isPast = selectedWeek < currentWeek;
 
                     return (
-                      <div className="mb-3 flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                      <div className="mb-3 flex items-center justify-between gap-2 bg-paper-card border border-line rounded-lg px-3 py-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <Target size={14} className="text-primary-500 shrink-0" />
                           {plan ? (
@@ -462,10 +465,10 @@ const Workout: React.FC<WorkoutProps> = ({
                                   "text-xs font-medium rounded px-1.5 py-0.5";
                                 const cls = isPast
                                   ? hit
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-red-100 text-red-800"
+                                    ? "bg-clean-100 text-green-800"
+                                    : "bg-owed-100 text-red-800"
                                   : hit
-                                    ? "bg-green-100 text-green-800"
+                                    ? "bg-clean-100 text-green-800"
                                     : "bg-primary-50 text-primary-700";
                                 return (
                                   <span
@@ -479,7 +482,7 @@ const Workout: React.FC<WorkoutProps> = ({
                               })}
                             </div>
                           ) : (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-ink-muted">
                               {editable
                                 ? "No plan yet this week"
                                 : "No plan — bonus unavailable"}
@@ -495,7 +498,7 @@ const Workout: React.FC<WorkoutProps> = ({
                           </button>
                         ) : (
                           !isPast && (
-                            <Lock size={12} className="text-gray-400 shrink-0" />
+                            <Lock size={12} className="text-ink-faint shrink-0" />
                           )
                         )}
                       </div>
@@ -521,10 +524,10 @@ const Workout: React.FC<WorkoutProps> = ({
 
                         return (
                           <div key={day} className="flex flex-col items-center">
-                            <span className={`text-xs font-medium ${isMustWorkout ? "text-amber-600" : "text-gray-500"}`}>
+                            <span className={`text-xs font-medium ${isMustWorkout ? "text-skip-600" : "text-ink-muted"}`}>
                               {day.charAt(0)}
                             </span>
-                            <span className="text-xs text-gray-400 mb-1">
+                            <span className="text-xs text-ink-faint mb-1">
                               {formatDayLabel(weekDates[dayIndex]).split(' ')[1]}
                             </span>
                             <button
@@ -533,7 +536,7 @@ const Workout: React.FC<WorkoutProps> = ({
                               }
                               disabled={!canLogFor(user.id)}
                               title={canLogFor(user.id) ? undefined : `Only ${user.name} can log this`}
-                              className={`w-9 h-9 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
+                              className={`w-11 h-11 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
                                 isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
                               } ${
                                 isMustWorkout && !isCompleted
@@ -541,12 +544,12 @@ const Workout: React.FC<WorkoutProps> = ({
                                   : ""
                               } ${
                                 isSteps
-                                  ? "bg-blue-500 text-white"
+                                  ? "bg-clean-500 text-white"
                                   : isCompleted
-                                    ? "bg-green-500 text-white"
+                                    ? "bg-clean-500 text-white"
                                     : isMustWorkout
-                                      ? "bg-amber-200 text-amber-700"
-                                      : "bg-gray-200 text-gray-400"
+                                      ? "bg-skip-100 text-skip-600"
+                                      : "bg-line text-ink-faint"
                               }`}
                             >
                               {isSteps ? (
@@ -571,23 +574,23 @@ const Workout: React.FC<WorkoutProps> = ({
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-4 font-medium text-gray-900 w-64">
+              <tr className="border-b border-line">
+                <th className="text-left py-3 px-4 font-medium text-ink w-64">
                   Participant
                 </th>
-                <th className="text-center py-3 px-3 font-medium text-gray-900 w-16">
-                  Level
+                <th className="text-center py-3 px-3 font-medium text-ink w-24">
+                  Miss costs
                 </th>
                 {daysOfWeek.map((day, dayIndex) => (
                   <th
                     key={day}
-                    className="text-center py-3 px-3 font-medium text-gray-900 w-16"
+                    className="text-center py-3 px-3 font-medium text-ink w-16"
                   >
                     <div>{day}</div>
-                    <div className="text-xs font-normal text-gray-500">{formatDayLabel(weekDates[dayIndex])}</div>
+                    <div className="text-xs font-normal text-ink-muted">{formatDayLabel(weekDates[dayIndex])}</div>
                   </th>
                 ))}
-                <th className="text-center py-3 px-4 font-medium text-gray-900 w-20">
+                <th className="text-center py-3 px-4 font-medium text-ink w-20">
                   Progress
                 </th>
               </tr>
@@ -595,17 +598,22 @@ const Workout: React.FC<WorkoutProps> = ({
             <tbody>
               {users
                 .filter((u) => u.isActive)
-                .sort((a, b) => a.name.localeCompare(b.name))
+                // Your own row first — nobody should scroll to find themselves.
+                .sort((a, b) => {
+                  if (a.id === currentUser?.id) return -1;
+                  if (b.id === currentUser?.id) return 1;
+                  return a.name.localeCompare(b.name);
+                })
                 .map((user) => {
                   const weekStats = getUserWeekStats(user.id, selectedWeek);
 
                   return (
                     <tr
                       key={user.id}
-                      className={`border-b border-gray-100 transition-colors ${
+                      className={`border-b border-line-soft transition-colors ${
                         weekStats.isComplete
-                          ? "bg-green-50 hover:bg-green-100 border-green-200"
-                          : "hover:bg-gray-50"
+                          ? "bg-clean-50 hover:bg-clean-100 border-green-200"
+                          : "hover:bg-paper-sunk"
                       }`}
                     >
                       <td className="py-4 px-4">
@@ -615,19 +623,26 @@ const Workout: React.FC<WorkoutProps> = ({
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center space-x-2">
-                              <span className="font-medium text-gray-900">
+                              <span className="font-semibold text-ink">
                                 {user.name}
                               </span>
+                              {canLogFor(user.id) ? (
+                                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] bg-clean-100 text-clean-700 px-1.5 py-0.5 rounded">
+                                  You
+                                </span>
+                              ) : (
+                                <Lock size={11} className="text-ink-faint" aria-label="Read-only" />
+                              )}
                               {weekStats.isComplete && (
-                                <span className="text-green-600 text-sm">
+                                <span className="text-clean-600 text-sm">
                                   ✅
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-gray-500">
+                            <div className="text-xs text-ink-muted">
                               {user.cleanWeeks} clean weeks
                               {weekStats.isComplete && (
-                                <span className="text-green-600 ml-1">
+                                <span className="text-clean-600 ml-1">
                                   • Week completed!
                                 </span>
                               )}
@@ -650,10 +665,10 @@ const Workout: React.FC<WorkoutProps> = ({
                                       );
                                       const cls = isPast
                                         ? hit
-                                          ? "bg-green-100 text-green-800"
-                                          : "bg-red-100 text-red-800"
+                                          ? "bg-clean-100 text-green-800"
+                                          : "bg-owed-100 text-red-800"
                                         : hit
-                                          ? "bg-green-100 text-green-800"
+                                          ? "bg-clean-100 text-green-800"
                                           : "bg-primary-50 text-primary-700";
                                       return (
                                         <span
@@ -666,7 +681,7 @@ const Workout: React.FC<WorkoutProps> = ({
                                       );
                                     })
                                   ) : (
-                                    <span className="text-[11px] text-gray-400">
+                                    <span className="text-[11px] text-ink-faint">
                                       {editable
                                         ? "No plan yet"
                                         : "No plan — bonus unavailable"}
@@ -680,7 +695,7 @@ const Workout: React.FC<WorkoutProps> = ({
                                       {plan ? "edit" : "commit →"}
                                     </button>
                                   ) : !isPast ? (
-                                    <Lock size={10} className="text-gray-400 ml-1" />
+                                    <Lock size={10} className="text-ink-faint ml-1" />
                                   ) : null}
                                 </div>
                               );
@@ -690,8 +705,10 @@ const Workout: React.FC<WorkoutProps> = ({
                       </td>
 
                       <td className="py-4 px-3 text-center">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
-                          {WORKOUTS_PER_WEEK}
+                        <span className="px-2 py-1 bg-paper-sunk text-ink text-xs font-semibold rounded tnum">
+                          {FINE_BY_LEVEL[user.priceLevel] != null
+                            ? `₹${FINE_BY_LEVEL[user.priceLevel].toLocaleString("en-IN")}`
+                            : "—"}
                         </span>
                       </td>
 
@@ -711,7 +728,7 @@ const Workout: React.FC<WorkoutProps> = ({
                           const isMustWorkout = mustDays.has(dow);
 
                           return (
-                            <td key={day} className={`py-4 px-3 text-center ${isMustWorkout ? "bg-amber-50" : ""}`}>
+                            <td key={day} className={`py-4 px-3 text-center ${isMustWorkout ? "bg-skip-50" : ""}`}>
                               <div className="flex justify-center">
                                 <button
                                   onClick={() =>
@@ -719,7 +736,7 @@ const Workout: React.FC<WorkoutProps> = ({
                                   }
                                   disabled={!canLogFor(user.id)}
                                   title={canLogFor(user.id) ? undefined : `Only ${user.name} can log this`}
-                                  className={`w-8 h-8 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
+                                  className={`w-11 h-11 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
                                     isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
                                   } ${
                                     isMustWorkout && !isCompleted
@@ -727,12 +744,12 @@ const Workout: React.FC<WorkoutProps> = ({
                                       : ""
                                   } ${
                                     isSteps
-                                      ? "bg-blue-500 text-white hover:bg-blue-600"
+                                      ? "bg-clean-500 text-white hover:bg-blue-600"
                                       : isCompleted
-                                        ? "bg-green-500 text-white hover:bg-green-600"
+                                        ? "bg-clean-500 text-white hover:bg-green-600"
                                         : isMustWorkout
-                                          ? "bg-amber-200 text-amber-700 hover:bg-amber-300"
-                                          : "bg-gray-200 text-gray-400 hover:bg-gray-300"
+                                          ? "bg-skip-100 text-skip-600 hover:bg-amber-300"
+                                          : "bg-line text-ink-faint hover:bg-gray-300"
                                   }`}
                                 >
                                   {isSteps ? (
@@ -754,8 +771,8 @@ const Workout: React.FC<WorkoutProps> = ({
                           <div
                             className={`text-sm font-medium ${
                               weekStats.isComplete
-                                ? "text-green-600"
-                                : "text-gray-600"
+                                ? "text-clean-600"
+                                : "text-ink-muted"
                             }`}
                           >
                             {weekStats.completed}/{weekStats.required}

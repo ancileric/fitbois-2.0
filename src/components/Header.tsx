@@ -1,10 +1,11 @@
 import React from "react";
 import { User } from "../types";
-import { Target, Settings, Dumbbell, IndianRupee } from "lucide-react";
+import { Settings, Monitor, Moon, Sun } from "lucide-react";
+import { useTheme } from "../utils/theme";
 
 interface HeaderProps {
   activeView: string;
-  onViewChange: (view: "season" | "workout" | "goals" | "admin") => void;
+  onViewChange: (view: "me" | "group" | "admin") => void;
   users: User[];
   currentUser: User | null;
   onChangePlayer: (id: string) => void;
@@ -17,53 +18,81 @@ const Header: React.FC<HeaderProps> = ({
   currentUser,
   onChangePlayer,
 }) => {
+  const { choice, cycle } = useTheme();
+
+  const themeIcon = choice === "light" ? Sun : choice === "dark" ? Moon : Monitor;
+  const ThemeIcon = themeIcon;
+  const themeLabel =
+    choice === "system" ? "Theme: match the device" : `Theme: always ${choice}`;
+
+  // Two places, not four: what is mine, and what is everyone's.
   const navItems = [
-    { id: "season", label: "Season", icon: IndianRupee },
-    { id: "workout", label: "Workout", icon: Dumbbell },
-    { id: "goals", label: "Goals", icon: Target },
-    { id: "admin", label: "Admin", icon: Settings },
+    { id: "me", label: "Me" },
+    { id: "group", label: "Group" },
   ] as const;
 
   return (
     <>
       {/* Desktop Header */}
-      <header className="bg-white border-b border-gray-100 hidden md:block">
-        <div className="container mx-auto px-4">
+      <header className="sticky top-0 z-40 hidden md:block bg-paper/85 backdrop-blur-xl border-b border-line">
+        <div className="max-w-5xl mx-auto px-5 sm:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center space-x-3">
-              <h1 className="text-xl font-bold text-gray-900">
-                💪 FitBros 3.0
-              </h1>
+              <h1 className="display text-2xl text-ink">FitBros 3.0</h1>
             </div>
 
             {/* Desktop Navigation */}
-            <nav className="flex space-x-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => onViewChange(item.id as any)}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
+            <nav className="flex gap-6">
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => onViewChange(item.id)}
+                  aria-current={activeView === item.id ? "page" : undefined}
+                  className={`relative min-h-[44px] text-sm font-semibold cursor-pointer
+                    transition-colors duration-150 ease-settle after:absolute after:left-0 after:right-0
+                    after:-bottom-px after:h-0.5 after:transition-colors after:duration-150 ${
                       activeView === item.id
-                        ? "bg-primary-500 text-white"
-                        : "text-gray-600 hover:bg-gray-100"
+                        ? "text-ink after:bg-ink"
+                        : "text-ink-muted hover:text-ink after:bg-transparent"
                     }`}
-                  >
-                    <Icon size={18} />
-                    <span className="font-medium">{item.label}</span>
-                  </button>
-                );
-              })}
+                >
+                  {item.label}
+                </button>
+              ))}
             </nav>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wide text-gray-400">Playing as</span>
+              <button
+                onClick={() => onViewChange("admin")}
+                title="Admin"
+                aria-label="Admin"
+                aria-current={activeView === "admin" ? "page" : undefined}
+                className={`min-w-[40px] min-h-[40px] grid place-items-center rounded-xl cursor-pointer
+                  transition-colors duration-150 ease-settle ${
+                    activeView === "admin" ? "text-ink bg-paper-sunk" : "text-ink-muted hover:text-ink"
+                  }`}
+              >
+                <Settings size={16} aria-hidden="true" />
+              </button>
+              <button
+                onClick={cycle}
+                title={themeLabel}
+                aria-label={themeLabel}
+                className="min-w-[40px] min-h-[40px] grid place-items-center rounded-xl text-ink-muted
+                           cursor-pointer transition-colors duration-150 ease-settle hover:text-ink"
+              >
+                <ThemeIcon size={16} aria-hidden="true" />
+              </button>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+                Playing as
+              </span>
               <select
                 value={currentUser?.id ?? ""}
                 onChange={(e) => onChangePlayer(e.target.value)}
-                className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-900"
+                aria-label="Choose which player you are"
+                className="min-h-[40px] pl-2 pr-8 border-0 bg-transparent text-sm font-semibold text-ink
+                           cursor-pointer focus:ring-2 focus:ring-clean-500 rounded-lg"
               >
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -77,13 +106,23 @@ const Header: React.FC<HeaderProps> = ({
       </header>
 
       {/* Mobile Header - Simple title bar */}
-      <header className="bg-white border-b border-gray-100 md:hidden">
+      <header className="sticky top-0 z-40 md:hidden bg-paper/85 backdrop-blur-xl border-b border-line">
         <div className="px-4 h-14 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-bold text-gray-900">💪 FitBros 3.0</h1>
+          <h1 className="display text-xl text-ink">FitBros 3.0</h1>
+          <button
+            onClick={cycle}
+            title={themeLabel}
+            aria-label={themeLabel}
+            className="min-w-[40px] min-h-[40px] grid place-items-center rounded-xl text-ink-muted
+                       cursor-pointer ml-auto mr-2"
+          >
+            <ThemeIcon size={16} aria-hidden="true" />
+          </button>
           <select
             value={currentUser?.id ?? ""}
             onChange={(e) => onChangePlayer(e.target.value)}
-            className="px-2 py-1 border border-gray-200 rounded-lg text-sm font-medium text-gray-900 max-w-[45%]"
+            aria-label="Choose which player you are"
+            className="min-h-[40px] pl-2 pr-8 border-0 bg-transparent text-sm font-semibold text-ink max-w-[45%] rounded-lg"
           >
             {users.map((u) => (
               <option key={u.id} value={u.id}>
@@ -95,25 +134,24 @@ const Header: React.FC<HeaderProps> = ({
       </header>
 
       {/* Mobile Bottom Tab Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 pb-safe">
+      <nav
+        aria-label="Sections"
+        className="fixed bottom-0 left-0 right-0 bg-paper/92 backdrop-blur-xl border-t border-line md:hidden z-50 pb-safe"
+      >
         <div className="flex">
-          {navItems.map((item) => {
-            const Icon = item.icon;
+          {[...navItems, { id: "admin", label: "Admin" } as const].map((item) => {
             const isActive = activeView === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => onViewChange(item.id as any)}
-                className={`flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] transition-colors ${
-                  isActive ? "text-primary-500" : "text-gray-400"
-                }`}
+                onClick={() => onViewChange(item.id)}
+                aria-current={isActive ? "page" : undefined}
+                className={`flex-1 flex items-center justify-center py-3 min-h-[56px] text-sm cursor-pointer
+                  transition-colors duration-150 ease-settle ${
+                    isActive ? "text-ink font-semibold" : "text-ink-muted font-medium"
+                  }`}
               >
-                <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-                <span
-                  className={`text-xs mt-1 ${isActive ? "font-semibold" : "font-medium"}`}
-                >
-                  {item.label}
-                </span>
+                {item.label}
               </button>
             );
           })}

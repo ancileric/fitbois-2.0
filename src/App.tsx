@@ -15,13 +15,13 @@ import { apiService } from "./services/api";
 
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
-const Workout = lazy(() => import("./components/Workout"));
-const SeasonBoard = lazy(() => import("./components/SeasonBoard"));
-const GoalBoard = lazy(() => import("./components/GoalBoard"));
+const GroupBoard = lazy(() => import("./components/GroupBoard"));
+const MeView = lazy(() => import("./components/MeView"));
+
 
 const Admin = lazy(() => import("./components/Admin"));
 
-type ActiveView = "season" | "workout" | "goals" | "admin";
+type ActiveView = "me" | "group" | "admin";
 
 const SNAPSHOT_KEY = "fitbois:snapshot";
 const SNAPSHOT_VERSION = 1;
@@ -79,7 +79,7 @@ function AppContent() {
   const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>(
     initialSnapshot?.weeklyPlans ?? []
   );
-  const [adminSettings] = useState<AdminSettings>({
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
     challengeEndDate: "2026-07-31",
     currentWeek: 1,
@@ -91,7 +91,11 @@ function AppContent() {
     return seeded.find((u) => u.id === remembered) ?? seeded[0] ?? null;
   });
   const [activeView, setActiveView] = useState<ActiveView>(
-    () => (localStorage.getItem("activeView") as ActiveView) ?? "season"
+    () => {
+      // A view name saved by an older build must not leave the page blank.
+      const saved = localStorage.getItem("activeView");
+      return saved === "me" || saved === "group" || saved === "admin" ? saved : "me";
+    }
   );
   const [isOffline, setIsOffline] = useState(false);
   const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(
@@ -114,6 +118,19 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem("activeView", activeView);
   }, [activeView]);
+
+  // One clock for the whole app: the week the server is scoring against.
+  useEffect(() => {
+    const api = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+    fetch(`${api}/settings`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((settings) => {
+        if (settings?.currentWeek) {
+          setAdminSettings((prev) => ({ ...prev, ...settings }));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -439,7 +456,7 @@ function AppContent() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="text-center max-w-sm">
           <h1 className="text-xl font-semibold text-gray-900 mb-2">
-            Can't reach FitBois
+            Can't reach FitBros
           </h1>
           <p className="text-gray-600 mb-6">
             We couldn't load your data and no offline copy is available on this
@@ -459,17 +476,17 @@ function AppContent() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-paper flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading FitBois 2.0...</p>
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-clean-500 mx-auto"></div>
+          <p className="mt-4 text-ink-muted">Loading the season…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-paper">
       {isOffline ? (
         <OfflineBanner
           mode="offline"
@@ -499,41 +516,32 @@ function AppContent() {
         }}
       />
 
-      <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
+      <main className="max-w-5xl mx-auto px-5 sm:px-8 py-8 pb-28 md:pb-12">
         <ErrorBoundary>
           <Suspense
             fallback={
               <div className="flex justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-clean-500"></div>
               </div>
             }
           >
-            {activeView === "season" && <SeasonBoard currentUser={currentUser} />}
-
-            {activeView === "workout" && (
-              <Workout
+            {activeView === "me" && (
+              <MeView
                 currentUser={currentUser}
-                users={users}
-                workoutDays={workoutDays}
-                weeklyPlans={weeklyPlans}
-                adminSettings={adminSettings}
-                onUpdateWorkoutDay={updateWorkoutDay}
-                onUpdateWeeklyPlan={updateWeeklyPlan}
-              />
-            )}
-
-            {activeView === "goals" && (
-              <GoalBoard
-                currentUser={currentUser}
-                user={currentUser}
                 users={users}
                 goals={goals}
+                workoutDays={workoutDays}
+                weeklyPlans={weeklyPlans}
+                challengeStartDate={adminSettings.challengeStartDate}
+                onUpdateWorkoutDay={updateWorkoutDay}
+                onUpdateWeeklyPlan={updateWeeklyPlan}
                 onAddGoal={addGoal}
                 onUpdateGoal={updateGoal}
                 onDeleteGoal={deleteGoal}
               />
             )}
 
+            {activeView === "group" && <GroupBoard currentUser={currentUser} />}
 
             {activeView === "admin" && (
               <Admin
@@ -546,6 +554,7 @@ function AppContent() {
                 onRecalculateConsistency={recalculateUserConsistency}
               />
             )}
+
           </Suspense>
         </ErrorBoundary>
       </main>
