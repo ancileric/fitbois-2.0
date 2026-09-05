@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
-import { User, WorkoutDay, WeeklyPlan, AdminSettings, getRequiredWorkouts } from "../types";
+import { User, WorkoutDay, WeeklyPlan, AdminSettings, WORKOUTS_PER_WEEK } from "../types";
 import {
   CheckCircle,
   XCircle,
@@ -11,10 +11,11 @@ import {
   Lock,
 } from "lucide-react";
 import { getCurrentWeek, getCurrentDayOfWeek, getDaysUntilStart, getWeekDates, formatDayLabel } from "../utils/dateUtils";
-import { calculateAllWeekStatuses, getMustWorkoutDays as calcMustWorkoutDays } from "../utils/consistencyCalculator";
+
 import WeeklyPlanModal, { PlanLockReason } from "./WeeklyPlanModal";
 
 interface WorkoutProps {
+  currentUser: User | null;
   users: User[];
   workoutDays: WorkoutDay[];
   weeklyPlans: WeeklyPlan[];
@@ -29,6 +30,7 @@ interface WorkoutProps {
 }
 
 const Workout: React.FC<WorkoutProps> = ({
+  currentUser,
   users,
   workoutDays,
   weeklyPlans,
@@ -115,20 +117,39 @@ const Workout: React.FC<WorkoutProps> = ({
       dayOfWeek,
       date: date.toISOString().split("T")[0],
       isCompleted,
-      markedBy: "admin",
+      markedBy: "user",
       timestamp: new Date().toISOString(),
       workoutType,
       notes: existing?.notes,
     };
 
+    if (!canLogFor(userId)) return;
     onUpdateWorkoutDay(workoutDay);
   };
 
-  // Simulated week statuses per user — historically accurate required workouts per week
+  /** Rule 05: your sheet is yours. Other players are visible, never editable. */
+  const canLogFor = (userId: string) => currentUser?.id === userId;
+
+  // A clean week is the same 5 workouts for everyone, so this is a plain count.
   const userWeekStatusesMap = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof calculateAllWeekStatuses>>();
+    const map = new Map<
+      string,
+      { week: number; isComplete: boolean; completedWorkouts: number; requiredWorkouts: number }[]
+    >();
     users.forEach((user) => {
-      map.set(user.id, calculateAllWeekStatuses(user, workoutDays, currentWeek));
+      const statuses = [];
+      for (let week = 1; week < currentWeek; week++) {
+        const completed = workoutDays.filter(
+          (w) => w.userId === user.id && w.week === week && w.isCompleted,
+        ).length;
+        statuses.push({
+          week,
+          isComplete: completed >= WORKOUTS_PER_WEEK,
+          completedWorkouts: completed,
+          requiredWorkouts: WORKOUTS_PER_WEEK,
+        });
+      }
+      map.set(user.id, statuses);
     });
     return map;
   }, [users, workoutDays, currentWeek]);
@@ -152,14 +173,12 @@ const Workout: React.FC<WorkoutProps> = ({
     }
 
     // For the current/future weeks, use the user's current level
-    const level = user.currentConsistencyLevel;
-    const requiredDays = getRequiredWorkouts(level);
+        const requiredDays = WORKOUTS_PER_WEEK;
     const effectiveWorkouts = workoutDays.filter(
       (w) =>
         w.userId === userId &&
         w.week === week &&
-        w.isCompleted &&
-        (level >= 5 || w.workoutType !== "steps"),
+        w.isCompleted,
     ).length;
 
     return {
@@ -201,20 +220,14 @@ const Workout: React.FC<WorkoutProps> = ({
             requiredWorkouts = weekStatus.requiredWorkouts;
             completedWorkouts = weekStatus.completedWorkouts;
           } else {
-            requiredWorkouts = getRequiredWorkouts(user.currentConsistencyLevel);
+            requiredWorkouts = WORKOUTS_PER_WEEK;
             completedWorkouts = 0;
           }
         } else {
           // For current/future weeks, use the user's current level
-          const level = user.currentConsistencyLevel;
-          requiredWorkouts = getRequiredWorkouts(level);
-          // Steps don't count toward the requirement at level 4/3
+          requiredWorkouts = WORKOUTS_PER_WEEK;
           completedWorkouts = workoutDays.filter(
-            (w) =>
-              w.userId === user.id &&
-              w.week === week &&
-              w.isCompleted &&
-              (level >= 5 || w.workoutType !== "steps"),
+            (w) => w.userId === user.id && w.week === week && w.isCompleted,
           ).length;
         }
 
@@ -273,11 +286,19 @@ const Workout: React.FC<WorkoutProps> = ({
     const stats = getUserWeekStats(userId, selectedWeek);
     if (stats.isComplete) return new Set();
     const user = users.find((u) => u.id === userId);
-    const level = user?.currentConsistencyLevel ?? 5;
-    const weekWorkouts = workoutDays.filter(
+        const weekWorkouts = workoutDays.filter(
       (w) => w.userId === userId && w.week === selectedWeek,
     );
-    return calcMustWorkoutDays(userId, weekWorkouts, level, stats.required, stats.completed, todayDow);
+    const remaining = stats.required - stats.completed;
+    const daysLeft = 7 - todayDow + 1;
+    if (remaining <= 0 || remaining < daysLeft) return new Set<number>();
+
+    const days = new Set<number>();
+    for (let d = todayDow; d <= 7; d++) {
+      const logged = weekWorkouts.find((w) => w.dayOfWeek === d && w.isCompleted);
+      if (!logged) days.add(d);
+    }
+    return days;
   };
 
   // For a committed day in a past week, has the user satisfied it?
@@ -285,15 +306,13 @@ const Workout: React.FC<WorkoutProps> = ({
     userId: string,
     week: number,
     day: number,
-    level: number,
   ): boolean => {
     return workoutDays.some(
       (w) =>
         w.userId === userId &&
         w.week === week &&
         w.dayOfWeek === day &&
-        w.isCompleted &&
-        (level >= 5 || w.workoutType !== "steps"),
+        w.isCompleted,
     );
   };
 
@@ -404,7 +423,7 @@ const Workout: React.FC<WorkoutProps> = ({
                           )}
                         </div>
                         <div className="text-xs text-gray-500">
-                          Level {user.currentConsistencyLevel} •{" "}
+                          {WORKOUTS_PER_WEEK} a week •{" "}
                           {user.cleanWeeks} clean weeks
                         </div>
                       </div>
@@ -425,8 +444,7 @@ const Workout: React.FC<WorkoutProps> = ({
                     const plan = getPlanFor(user.id);
                     const lockReason = getLockReason(user.id);
                     const editable = lockReason === null;
-                    const level = user.currentConsistencyLevel;
-                    const isPast = selectedWeek < currentWeek;
+                                        const isPast = selectedWeek < currentWeek;
 
                     return (
                       <div className="mb-3 flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
@@ -439,7 +457,6 @@ const Workout: React.FC<WorkoutProps> = ({
                                   user.id,
                                   selectedWeek,
                                   d,
-                                  level,
                                 );
                                 const baseCls =
                                   "text-xs font-medium rounded px-1.5 py-0.5";
@@ -469,7 +486,7 @@ const Workout: React.FC<WorkoutProps> = ({
                             </span>
                           )}
                         </div>
-                        {editable ? (
+                        {editable && canLogFor(user.id) ? (
                           <button
                             onClick={() => setPlanModalUserId(user.id)}
                             className="text-xs font-medium text-primary-600 hover:text-primary-700 shrink-0"
@@ -514,7 +531,9 @@ const Workout: React.FC<WorkoutProps> = ({
                               onClick={() =>
                                 cycleWorkout(user, selectedWeek, dow)
                               }
-                              className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                              disabled={!canLogFor(user.id)}
+                              title={canLogFor(user.id) ? undefined : `Only ${user.name} can log this`}
+                              className={`w-9 h-9 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
                                 isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
                               } ${
                                 isMustWorkout && !isCompleted
@@ -617,8 +636,7 @@ const Workout: React.FC<WorkoutProps> = ({
                               const plan = getPlanFor(user.id);
                               const lockReason = getLockReason(user.id);
                               const editable = lockReason === null;
-                              const level = user.currentConsistencyLevel;
-                              const isPast = selectedWeek < currentWeek;
+                                                            const isPast = selectedWeek < currentWeek;
 
                               return (
                                 <div className="mt-1 flex items-center gap-1 flex-wrap">
@@ -629,7 +647,6 @@ const Workout: React.FC<WorkoutProps> = ({
                                         user.id,
                                         selectedWeek,
                                         d,
-                                        level,
                                       );
                                       const cls = isPast
                                         ? hit
@@ -657,7 +674,7 @@ const Workout: React.FC<WorkoutProps> = ({
                                   )}
                                   {editable ? (
                                     <button
-                                      onClick={() => setPlanModalUserId(user.id)}
+                                      onClick={() => canLogFor(user.id) && setPlanModalUserId(user.id)}
                                       className="text-[11px] font-medium text-primary-600 hover:text-primary-700 ml-1"
                                     >
                                       {plan ? "edit" : "commit →"}
@@ -674,7 +691,7 @@ const Workout: React.FC<WorkoutProps> = ({
 
                       <td className="py-4 px-3 text-center">
                         <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
-                          {user.currentConsistencyLevel}
+                          {WORKOUTS_PER_WEEK}
                         </span>
                       </td>
 
@@ -700,7 +717,9 @@ const Workout: React.FC<WorkoutProps> = ({
                                   onClick={() =>
                                     cycleWorkout(user, selectedWeek, dow)
                                   }
-                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                                  disabled={!canLogFor(user.id)}
+                                  title={canLogFor(user.id) ? undefined : `Only ${user.name} can log this`}
+                                  className={`w-8 h-8 rounded-full disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors ${
                                     isCommitted ? "ring-2 ring-primary-500 ring-offset-1" : ""
                                   } ${
                                     isMustWorkout && !isCompleted
@@ -763,12 +782,26 @@ const Workout: React.FC<WorkoutProps> = ({
           weekDates={weekDates}
           existingPlan={planModalExistingPlan}
           lockReason={planModalLockReason}
+          swapsUsed={planModalExistingPlan?.swapsUsed ?? 0}
+          onSwap={async (from, to) => {
+            const api = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+            const res = await fetch(
+              `${api}/weekly-plans/${planModalUser.id}/${selectedWeek}/swap`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ from, to }),
+              }
+            );
+            const body = await res.json();
+            return res.ok ? null : body.error;
+          }}
           onSave={async (days) => {
             await onUpdateWeeklyPlan({
               userId: planModalUser.id,
               week: selectedWeek,
               committedDays: days,
-              createdBy: "admin",
+              createdBy: "user",
             });
           }}
         />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Lock, Calendar } from "lucide-react";
-import { User, WeeklyPlan, getRequiredWorkouts } from "../types";
+import { User, WeeklyPlan, WORKOUTS_PER_WEEK } from "../types";
 import { formatDayLabel } from "../utils/dateUtils";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -11,6 +11,8 @@ export type PlanLockReason =
   | "workout-logged"
   | null;
 
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
 interface WeeklyPlanModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -20,6 +22,9 @@ interface WeeklyPlanModalProps {
   existingPlan: WeeklyPlan | null;
   lockReason: PlanLockReason;
   onSave: (committedDays: number[]) => Promise<void>;
+  /** Rule 06: one swap a week, applied before the day starts. */
+  onSwap?: (from: number, to: number) => Promise<string | null>;
+  swapsUsed?: number;
 }
 
 const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
@@ -31,10 +36,14 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
   existingPlan,
   lockReason,
   onSave,
+  onSwap,
+  swapsUsed = 0,
 }) => {
-  const required = getRequiredWorkouts(user.currentConsistencyLevel);
+  const required = WORKOUTS_PER_WEEK;
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [swapFrom, setSwapFrom] = useState<number | null>(null);
+  const [swapNotice, setSwapNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -96,7 +105,7 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
               Week {week} Plan — {user.name}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Level {user.currentConsistencyLevel} · Commit to at least{" "}
+              Commit to at least{" "}
               {required} days
             </p>
           </div>
@@ -115,6 +124,58 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
             <span>{lockMessage}</span>
           </div>
         )}
+
+
+        {isLocked && onSwap && existingPlan ? (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              Swap a session {swapsUsed >= 1 ? "— spent for this week" : "— one a week"}
+            </p>
+            {swapsUsed >= 1 ? (
+              <p className="text-sm text-gray-500">You've already swapped this week.</p>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600 mb-2">
+                  {swapFrom
+                    ? `Moving ${DAY_NAMES[swapFrom - 1]} to…`
+                    : "Pick the committed day you're moving."}
+                </p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
+                    const committed = existingPlan.committedDays.includes(dow);
+                    const pickable = swapFrom ? !committed : committed;
+                    return (
+                      <button
+                        key={dow}
+                        disabled={!pickable || submitting}
+                        onClick={async () => {
+                          if (!swapFrom) {
+                            setSwapFrom(dow);
+                            setSwapNotice(null);
+                            return;
+                          }
+                          setSubmitting(true);
+                          const error = await onSwap(swapFrom, dow);
+                          setSubmitting(false);
+                          setSwapFrom(null);
+                          setSwapNotice(error ?? `Moved to ${DAY_NAMES[dow - 1]}.`);
+                        }}
+                        className={`w-10 h-9 rounded-lg text-xs font-semibold border ${
+                          swapFrom === dow
+                            ? "border-primary-500 bg-primary-50 text-primary-700"
+                            : "border-gray-200 text-gray-700"
+                        } disabled:opacity-30 disabled:cursor-not-allowed`}
+                      >
+                        {DAY_NAMES[dow - 1].slice(0, 2)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {swapNotice ? <p className="text-sm text-gray-700 mt-2">{swapNotice}</p> : null}
+              </>
+            )}
+          </div>
+        ) : null}
 
         {!isLocked && (
           <p className="text-sm text-gray-600 mb-4 mt-3">

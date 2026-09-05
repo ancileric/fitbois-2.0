@@ -12,17 +12,16 @@ import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
 import { apiService } from "./services/api";
-import { updateAllUsersConsistency } from "./utils/consistencyCalculator";
-import { getCurrentWeek } from "./utils/dateUtils";
 
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
 const Workout = lazy(() => import("./components/Workout"));
-const Goals = lazy(() => import("./components/Goals"));
-const Dashboard = lazy(() => import("./components/Dashboard"));
+const SeasonBoard = lazy(() => import("./components/SeasonBoard"));
+const GoalBoard = lazy(() => import("./components/GoalBoard"));
+
 const Admin = lazy(() => import("./components/Admin"));
 
-type ActiveView = "workout" | "goals" | "dashboard" | "admin";
+type ActiveView = "season" | "workout" | "goals" | "admin";
 
 const SNAPSHOT_KEY = "fitbois:snapshot";
 const SNAPSHOT_VERSION = 1;
@@ -62,12 +61,6 @@ const writeSnapshot = (snap: Omit<Snapshot, "version" | "savedAt">): void => {
   }
 };
 
-const userConsistencyEqual = (a: User, b: User): boolean =>
-  a.cleanWeeks === b.cleanWeeks &&
-  a.missedWeeks === b.missedWeeks &&
-  a.currentConsistencyLevel === b.currentConsistencyLevel &&
-  a.totalPoints === b.totalPoints &&
-  a.isActive === b.isActive;
 
 const HYDRATING_BANNER_DELAY_MS = 1500;
 
@@ -92,11 +85,13 @@ function AppContent() {
     currentWeek: 1,
     isActive: true,
   });
-  const [currentUser, setCurrentUser] = useState<User | null>(
-    initialSnapshot?.users[0] ?? null
-  );
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const remembered = localStorage.getItem("playerId");
+    const seeded = initialSnapshot?.users ?? [];
+    return seeded.find((u) => u.id === remembered) ?? seeded[0] ?? null;
+  });
   const [activeView, setActiveView] = useState<ActiveView>(
-    () => (localStorage.getItem("activeView") as ActiveView) ?? "workout"
+    () => (localStorage.getItem("activeView") as ActiveView) ?? "season"
   );
   const [isOffline, setIsOffline] = useState(false);
   const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(
@@ -122,41 +117,21 @@ function AppContent() {
 
   const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Derived state (price level, standing, fines) is computed by the server from
+   * the workout sheet, so the client only re-reads it. Kept as a hook because the
+   * screens still call it after a change lands.
+   */
   const recalculateUserConsistency = useCallback(() => {
     if (recalcTimerRef.current) clearTimeout(recalcTimerRef.current);
     recalcTimerRef.current = setTimeout(() => {
-      setUsers((currentUsers) => {
-        const currentWeek = getCurrentWeek();
-        const goalData = goals.map((g) => ({
-          userId: g.userId,
-          isCompleted: g.isCompleted,
-        }));
-
-        const updatedUsers = updateAllUsersConsistency(
-          currentUsers,
-          workoutDays,
-          goalData,
-          currentWeek,
-          weeklyPlans,
-        );
-
-        if (!isOffline) {
-          updatedUsers
-            .filter((u) => {
-              const original = currentUsers.find((o) => o.id === u.id);
-              return original && !userConsistencyEqual(original, u);
-            })
-            .forEach((u) => {
-              apiService.updateUser(u.id, u).catch((error) => {
-                console.error("Error updating user in database:", error);
-              });
-            });
-        }
-
-        return updatedUsers;
-      });
+      if (isOffline) return;
+      apiService
+        .getUsers()
+        .then((freshUsers) => setUsers(freshUsers))
+        .catch((error) => console.error("Error refreshing users:", error));
     }, 300);
-  }, [goals, workoutDays, weeklyPlans, isOffline]);
+  }, [isOffline]);
 
   const clearRetryTimer = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -177,34 +152,15 @@ function AppContent() {
         apiService.getWeeklyPlans().catch(() => [] as WeeklyPlan[]),
       ]);
 
-      const currentWeek = getCurrentWeek();
-      const goalData = dbGoals.map((g) => ({
-        userId: g.userId,
-        isCompleted: g.isCompleted,
-      }));
-      const recalculated = updateAllUsersConsistency(
-        dbUsers,
-        dbWorkouts,
-        goalData,
-        currentWeek,
-        dbPlans,
-      );
-
-      const drifted = recalculated.filter((u) => {
-        const original = dbUsers.find((o) => o.id === u.id);
-        return original && !userConsistencyEqual(original, u);
-      });
+      const recalculated = dbUsers;
 
       setUsers(recalculated);
       setWorkoutDays(dbWorkouts);
       setGoals(dbGoals);
       setWeeklyPlans(dbPlans);
       setCurrentUser((prev) => {
-        if (prev) {
-          const match = recalculated.find((u) => u.id === prev.id);
-          if (match) return match;
-        }
-        return recalculated[0] || null;
+        const remembered = prev?.id ?? localStorage.getItem("playerId");
+        return recalculated.find((u) => u.id === remembered) ?? recalculated[0] ?? null;
       });
 
       writeSnapshot({
@@ -217,13 +173,6 @@ function AppContent() {
       setIsOffline(false);
       setLoadFailed(false);
       retryAttemptRef.current = 0;
-
-      // Persist recomputed consistency for any users that drifted from DB.
-      drifted.forEach((u) => {
-        apiService.updateUser(u.id, u).catch((error) => {
-          console.error("Error syncing consistency to database:", error);
-        });
-      });
 
       return true;
     } catch (error) {
@@ -536,7 +485,19 @@ function AppContent() {
           isRetrying={isRetrying}
         />
       ) : null}
-      <Header activeView={activeView} onViewChange={setActiveView} />
+      <Header
+        activeView={activeView}
+        onViewChange={setActiveView}
+        users={users}
+        currentUser={currentUser}
+        onChangePlayer={(id) => {
+          const next = users.find((u) => u.id === id) ?? null;
+          if (next) {
+            localStorage.setItem("playerId", next.id);
+            setCurrentUser(next);
+          }
+        }}
+      />
 
       <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
         <ErrorBoundary>
@@ -547,8 +508,11 @@ function AppContent() {
               </div>
             }
           >
+            {activeView === "season" && <SeasonBoard currentUser={currentUser} />}
+
             {activeView === "workout" && (
               <Workout
+                currentUser={currentUser}
                 users={users}
                 workoutDays={workoutDays}
                 weeklyPlans={weeklyPlans}
@@ -559,7 +523,8 @@ function AppContent() {
             )}
 
             {activeView === "goals" && (
-              <Goals
+              <GoalBoard
+                currentUser={currentUser}
                 user={currentUser}
                 users={users}
                 goals={goals}
@@ -569,15 +534,6 @@ function AppContent() {
               />
             )}
 
-            {activeView === "dashboard" && (
-              <Dashboard
-                currentUser={currentUser}
-                users={users}
-                goals={goals}
-                workoutDays={workoutDays}
-                weeklyPlans={weeklyPlans}
-              />
-            )}
 
             {activeView === "admin" && (
               <Admin

@@ -65,13 +65,9 @@ const Admin: React.FC<AdminProps> = ({
   const [newUser, setNewUser] = useState({
     name: '',
     avatar: '',
-    currentConsistencyLevel: 5 as 3 | 4 | 5,
     cleanWeeks: 0,
     missedWeeks: 0,
     isActive: true,
-    specialRules: {
-      startingLevel: undefined as number | undefined
-    }
   });
 
   // Admin-specific calculations (workout tracking moved to Workout component)
@@ -91,27 +87,19 @@ const Admin: React.FC<AdminProps> = ({
       name: newUser.name,
       avatar: newUser.avatar || newUser.name.charAt(0).toUpperCase(),
       startDate: adminSettings.challengeStartDate,
-      currentConsistencyLevel: newUser.currentConsistencyLevel,
+      // Everyone opens at the cheapest price, active, on the group's default clock.
+      priceLevel: 1,
       cleanWeeks: newUser.cleanWeeks,
       missedWeeks: newUser.missedWeeks,
-      totalPoints: 0,
+      standing: 'active',
+      cutoffHour: 0,
+      weekEndDay: 7,
       isActive: newUser.isActive,
-      specialRules: newUser.specialRules.startingLevel ? {
-        startingLevel: newUser.specialRules.startingLevel
-      } : undefined,
     };
 
     console.log('📤 Sending user to API:', userToAdd);
     onUpdateUser(userToAdd);
-    setNewUser({
-      name: '',
-      avatar: '',
-      currentConsistencyLevel: 5,
-      cleanWeeks: 0,
-      missedWeeks: 0,
-      isActive: true,
-      specialRules: { startingLevel: undefined }
-    });
+    setNewUser({ name: '', avatar: '', cleanWeeks: 0, missedWeeks: 0, isActive: true });
     setShowAddUser(false);
   };
 
@@ -121,11 +109,9 @@ const Admin: React.FC<AdminProps> = ({
     setNewUser({
       name: user.name,
       avatar: user.avatar || '',
-      currentConsistencyLevel: user.currentConsistencyLevel,
       cleanWeeks: user.cleanWeeks,
       missedWeeks: user.missedWeeks,
       isActive: user.isActive,
-      specialRules: { startingLevel: user.specialRules?.startingLevel }
     });
     setShowAddUser(true);
   };
@@ -138,14 +124,9 @@ const Admin: React.FC<AdminProps> = ({
       ...editingUser,
       name: newUser.name,
       avatar: newUser.avatar || newUser.name.charAt(0).toUpperCase(),
-      currentConsistencyLevel: newUser.currentConsistencyLevel,
       cleanWeeks: newUser.cleanWeeks,
       missedWeeks: newUser.missedWeeks,
       isActive: newUser.isActive,
-      specialRules: (newUser.specialRules.startingLevel || editingUser.specialRules?.reactivatedAtWeek) ? {
-        startingLevel: newUser.specialRules.startingLevel,
-        reactivatedAtWeek: editingUser.specialRules?.reactivatedAtWeek,
-      } : undefined,
     };
 
     onUpdateUser(updatedUser);
@@ -153,11 +134,9 @@ const Admin: React.FC<AdminProps> = ({
     setNewUser({
       name: '',
       avatar: '',
-      currentConsistencyLevel: 5,
       cleanWeeks: 0,
       missedWeeks: 0,
       isActive: true,
-      specialRules: { startingLevel: undefined }
     });
     setShowAddUser(false);
   };
@@ -445,18 +424,6 @@ const Admin: React.FC<AdminProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Consistency Level</label>
-                  <select
-                    value={newUser.currentConsistencyLevel}
-                    onChange={(e) => setNewUser({ ...newUser, currentConsistencyLevel: Number(e.target.value) as 3 | 4 | 5 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  >
-                    <option value={5}>5 days/week</option>
-                    <option value={4}>4 days/week</option>
-                    <option value={3}>3 days/week</option>
-                  </select>
-                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Clean Weeks</label>
@@ -493,33 +460,7 @@ const Admin: React.FC<AdminProps> = ({
                     <option value="inactive">Inactive</option>
                   </select>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Special Starting Level</label>
-                  <select
-                    value={newUser.specialRules.startingLevel || ''}
-                    onChange={(e) => setNewUser({
-                      ...newUser,
-                      specialRules: {
-                        startingLevel: e.target.value ? Number(e.target.value) : undefined
-                      }
-                    })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  >
-                    <option value="">None</option>
-                    <option value="4">4 days/week (Winner Bonus)</option>
-                    <option value="3">3 days/week</option>
-                  </select>
-                </div>
               </div>
-
-              {newUser.specialRules.startingLevel && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <p className="text-sm text-yellow-800">
-                    🏆 This participant will start at {newUser.specialRules.startingLevel} days/week instead of the default 5 days/week.
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="flex space-x-3 mt-6">
@@ -530,11 +471,9 @@ const Admin: React.FC<AdminProps> = ({
                   setNewUser({
                     name: '',
                     avatar: '',
-                    currentConsistencyLevel: 5,
                     cleanWeeks: 0,
                     missedWeeks: 0,
                     isActive: true,
-                    specialRules: { startingLevel: undefined }
                   });
                 }}
                 className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50"

@@ -1,7 +1,7 @@
 const db = require("../db");
 
 async function initDatabase() {
-  console.log("🚀 Initializing FitBois 2.0 Database...");
+  console.log("🚀 Initializing FitBros 3.0 Database...");
 
   // Create tables
   await db.exec(`
@@ -10,13 +10,12 @@ async function initDatabase() {
       name TEXT NOT NULL,
       avatar TEXT,
       start_date TEXT NOT NULL,
-      current_consistency_level INTEGER NOT NULL DEFAULT 5,
+      price_level INTEGER NOT NULL DEFAULT 1,
       clean_weeks INTEGER NOT NULL DEFAULT 0,
       missed_weeks INTEGER NOT NULL DEFAULT 0,
-      total_points INTEGER NOT NULL DEFAULT 0,
-      is_active BOOLEAN NOT NULL DEFAULT 1,
-      special_starting_level INTEGER,
-      reactivated_at_week INTEGER,
+      standing TEXT NOT NULL DEFAULT 'active',
+      cutoff_hour INTEGER NOT NULL DEFAULT 0,
+      week_end_day INTEGER NOT NULL DEFAULT 7,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -29,13 +28,15 @@ async function initDatabase() {
       user_id TEXT NOT NULL,
       category TEXT NOT NULL,
       description TEXT NOT NULL,
-      is_difficult BOOLEAN NOT NULL DEFAULT 0,
+      points INTEGER NOT NULL DEFAULT 1,
+      baseline TEXT,
+      target TEXT,
+      approved_at TEXT,
       is_completed BOOLEAN NOT NULL DEFAULT 0,
       completed_date TEXT,
       created_date TEXT NOT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, category)
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
   `);
   console.log("✅ Goals table ready");
@@ -107,6 +108,37 @@ async function initDatabase() {
   console.log("✅ Weekly plans table ready");
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS fines (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      amount INTEGER NOT NULL,
+      price_level INTEGER NOT NULL,
+      issued_at TEXT NOT NULL,
+      due_at TEXT NOT NULL,
+      settled_at TEXT,
+      waived_by_token_id TEXT,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week)
+    )
+  `);
+  console.log("✅ Fines table ready");
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS skip_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      requested_at TEXT NOT NULL,
+      approved_at TEXT,
+      approved_by TEXT,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      UNIQUE(user_id, week)
+    )
+  `);
+  console.log("✅ Skip tokens table ready");
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS admin_settings (
       id INTEGER PRIMARY KEY,
       challenge_start_date TEXT NOT NULL,
@@ -124,12 +156,15 @@ async function initDatabase() {
     { name: "idx_workout_week", table: "workout_days", columns: "week" },
     { name: "idx_workout_user_week", table: "workout_days", columns: "user_id, week" },
     { name: "idx_goals_user", table: "goals", columns: "user_id" },
-    { name: "idx_goals_category", table: "goals", columns: "category" },
+    { name: "idx_goals_user_points", table: "goals", columns: "user_id, points" },
     { name: "idx_proofs_user", table: "proofs", columns: "user_id" },
     { name: "idx_proofs_goal", table: "proofs", columns: "goal_id" },
     { name: "idx_weekly_updates_user", table: "weekly_updates", columns: "user_id" },
     { name: "idx_weekly_plans_user", table: "weekly_plans", columns: "user_id" },
     { name: "idx_weekly_plans_week", table: "weekly_plans", columns: "week" },
+    { name: "idx_fines_user", table: "fines", columns: "user_id" },
+    { name: "idx_fines_unsettled", table: "fines", columns: "user_id, settled_at" },
+    { name: "idx_skip_tokens_user", table: "skip_tokens", columns: "user_id" },
   ];
 
   for (const idx of indexes) {

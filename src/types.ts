@@ -3,35 +3,63 @@ export interface User {
   name: string;
   avatar?: string;
   startDate: string;
-  currentConsistencyLevel: 3 | 4 | 5; // consistency level (levels 3 & 4 both require 4 workouts/week)
+  /** What a missed week costs this player: 1 = ₹500, 2 = ₹1,000, 3 = ₹2,000. */
+  priceLevel: 1 | 2 | 3;
   cleanWeeks: number;
   missedWeeks: number;
-  totalPoints: number;
+  standing: "active" | "suspended" | "out";
+  /** The hour this player's day rolls over, locked at Week 0. */
+  cutoffHour: number;
+  /** 1 = Monday … 7 = Sunday. Locked at Week 0. */
+  weekEndDay: number;
+  /** Only elimination makes a player inactive now. */
   isActive: boolean;
+
+  // --- FitBois 2.0 fields, still read by screens that haven't migrated ---
+  /** @deprecated workload ladder; replaced by priceLevel */
+  currentConsistencyLevel?: 3 | 4 | 5;
+  /** @deprecated no points in FitBros 3.0 */
+  totalPoints?: number;
+  /** @deprecated everyone starts at the same price now */
   specialRules?: {
-    startingLevel?: number; // For users like Subhash who start at 4 days
-    reactivatedAtWeek?: number; // Week from which a second-chance user's stint resets
+    startingLevel?: number;
+    reactivatedAtWeek?: number;
   };
 }
 
 export interface Goal {
   id: string;
   userId: string;
-  category: GoalCategory;
+  /** Free text now — players choose their own categories. */
+  category: string;
   description: string;
-  isDifficult: boolean; // At least one goal must be difficult
+  /** 3 = Heavy, 2 = Medium, 1 = Light. Must total 6 across 2-6 goals. */
+  points: 1 | 2 | 3;
+  /** Where you started, recorded at Week 0. */
+  baseline?: string;
+  /** What counts as completing it. */
+  target?: string;
+  /** A goal is live once the group signs off. */
+  approvedAt?: string;
   isCompleted: boolean;
   completedDate?: string;
   proofs: Proof[];
   createdDate: string;
+
+  /** @deprecated replaced by points */
+  isDifficult?: boolean;
 }
 
-export type GoalCategory = 
-  | 'cardio'
-  | 'strength' 
-  | 'consistency'
-  | 'sports'
-  | 'personal-growth';
+/** @deprecated FitBros 3.0 lets players name their own categories. */
+export type GoalCategory = string;
+
+/** Rule 02: 6 points, split across 2 to 6 goals. */
+export const GOAL_BUDGET = 6;
+export const GOAL_TIERS = [
+  { points: 3, name: 'Heavy' },
+  { points: 2, name: 'Medium' },
+  { points: 1, name: 'Light' },
+] as const;
 
 export interface Proof {
   id: string;
@@ -76,6 +104,8 @@ export interface WeeklyPlan {
   committedDays: number[]; // 1 = Monday … 7 = Sunday
   committedAt: string;
   createdBy: 'user' | 'admin';
+  /** Rule 06: one swap a week. */
+  swapsUsed?: number;
 }
 
 export interface AdminSettings {
@@ -85,32 +115,11 @@ export interface AdminSettings {
   isActive: boolean;
 }
 
-export interface ConsistencyRule {
-  level: 3 | 4 | 5;
-  daysPerWeek: number;
-  cleanWeeksRequired: number;
-  canUseSteps: boolean;
-}
+/** A clean week is 5 workouts, the same for everyone (see seasonEngine). */
+export const WORKOUTS_PER_WEEK = 5;
 
-export const CONSISTENCY_RULES: ConsistencyRule[] = [
-  { level: 5, daysPerWeek: 5, cleanWeeksRequired: 3, canUseSteps: true },
-  { level: 4, daysPerWeek: 4, cleanWeeksRequired: 3, canUseSteps: false },
-  { level: 3, daysPerWeek: 4, cleanWeeksRequired: 0, canUseSteps: false },
-];
+/** @deprecated the workload ladder is gone; a clean week is always WORKOUTS_PER_WEEK. */
+export const getRequiredWorkouts = (_level?: number): number => WORKOUTS_PER_WEEK;
 
-/**
- * Get the required number of workouts per week for a given consistency level.
- * Levels 3 and 4 both require 4 workouts/week. Level 5 requires 5.
- */
-export const getRequiredWorkouts = (level: number): number => {
-  if (level <= 4) return 4;
-  return level;
-};
-
-export const GOAL_CATEGORIES = [
-  { id: 'cardio', name: 'Cardio / Endurance', icon: '🏃‍♂️' },
-  { id: 'strength', name: 'Strength', icon: '💪' },
-  { id: 'consistency', name: 'Consistency / Habit Building', icon: '📅' },
-  { id: 'sports', name: 'Sports / Play', icon: '⚽' },
-  { id: 'personal-growth', name: 'Personal Growth', icon: '🎯' },
-] as const;
+/** @deprecated players name their own categories now. */
+export const GOAL_CATEGORIES = [] as const;
