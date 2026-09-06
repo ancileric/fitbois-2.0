@@ -5,8 +5,8 @@
  * document cannot drift into saying different things. If a rule changes, it
  * changes in both places together.
  *
- * `ties` records which other rules a rule leans on — Rule 05 (fines) is only
- * legible next to Rule 04 (logging), and the app should let people follow that.
+ * `ties` records which other rules a rule leans on — Rule 04 (fines) is only
+ * legible next to Rule 03 (logging), and the app should let people follow that.
  */
 
 export interface Rule {
@@ -41,7 +41,7 @@ export const ALL_RULES: Rule[] = [
     ],
     points: [],
     table: [],
-    ties: ["r3", "r4"],
+    ties: ["r3"],
     hasDefault: false,
   },
   {
@@ -49,9 +49,9 @@ export const ALL_RULES: Rule[] = [
     number: "02",
     title: "Week 0",
     stage: "Before you start",
-    summary: "Goals approved, baselines recorded, clocks locked.",
+    summary: "Goals posted, baselines recorded, clocks locked.",
     paragraphs: [
-      "Everyone posts their goals and the group signs off. A goal is live once approved.",
+      "Everyone posts their goals. Nobody approves them and nobody has to — a goal is live the moment you set it. What Week 0 fixes is the numbers you start from and the clock you run on.",
     ],
     points: [
       "Baselines — video of the lift, current time, current max",
@@ -63,24 +63,8 @@ export const ALL_RULES: Rule[] = [
     hasDefault: false,
   },
   {
-    id: "r4",
-    number: "03",
-    title: "Changing a goal",
-    stage: "Before you start",
-    summary: "Only once you've completed it. Group votes.",
-    paragraphs: [],
-    points: [
-      "Petition the group, set a meeting time",
-      "Only people who attend get a vote",
-      "Tied vote → the original goal stands",
-    ],
-    table: [],
-    ties: ["r1"],
-    hasDefault: true,
-  },
-  {
     id: "r5",
-    number: "04",
+    number: "03",
     title: "Logging",
     stage: "Week to week",
     summary: "One shared sheet. A session is a workout, 10k steps is half.",
@@ -99,7 +83,7 @@ export const ALL_RULES: Rule[] = [
   },
   {
     id: "r7",
-    number: "05",
+    number: "04",
     title: "Fines",
     stage: "When you miss",
     summary: "₹200 to start. Two misses at a price, then it doubles.",
@@ -120,7 +104,7 @@ export const ALL_RULES: Rule[] = [
   },
   {
     id: "r11",
-    number: "06",
+    number: "05",
     title: "Winning",
     stage: "How it ends",
     summary: "Everyone with nothing owing splits the pot. Most goals wins the title.",
@@ -135,7 +119,7 @@ export const ALL_RULES: Rule[] = [
   },
   {
     id: "r12",
-    number: "07",
+    number: "06",
     title: "Admin",
     stage: "How it ends",
     summary: "Scorekeeper and Treasurer. Two people, both unassigned.",

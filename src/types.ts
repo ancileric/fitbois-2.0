@@ -40,8 +40,6 @@ export interface Goal {
   baselineValue?: number;
   targetValue?: number;
   unit?: string;
-  /** A goal is live once the group signs off. */
-  approvedAt?: string;
   isCompleted: boolean;
   completedDate?: string;
   proofs: Proof[];

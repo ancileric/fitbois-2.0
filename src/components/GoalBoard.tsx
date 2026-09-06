@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Gavel, Lock, Plus, Stamp, TrendingUp, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Check, Lock, Plus, TrendingUp, Trash2 } from "lucide-react";
 import { Goal, User } from "../types";
 import { goalEligibilityError, goalProgressFraction } from "../utils/seasonEngine";
 import { apiFetch } from "../services/http";
@@ -20,17 +20,6 @@ interface GoalBoardProps {
   onAddGoal: (goal: Goal) => void;
   onUpdateGoal: (goal: Goal) => void;
   onDeleteGoal: (goalId: string) => void;
-}
-
-/** Rule 04: what the group has been asked to replace, as the server records it. */
-interface Petition {
-  id: string;
-  goalId: string;
-  raisedBy: string;
-  raisedByName: string;
-  reason: string | null;
-  status: string;
-  raisedAt: string;
 }
 
 /** One logged reading, exactly as the server stores it. */
@@ -242,29 +231,10 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     to: "",
     unit: "",
   });
-  const [petitions, setPetitions] = useState<Petition[]>([]);
-  /**
-   * Sign-offs made in this session. The goals themselves are App's to own and
-   * it only reloads them on a refresh, so a just-approved goal reads as live
-   * straight away rather than waiting a page load to catch up.
-   */
-  const [signedOff, setSignedOff] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logging, setLogging] = useState<string | null>(null);
   const [reading, setReading] = useState("");
   const [readings, setReadings] = useState<Record<string, Reading[]>>({});
-
-  // Petitions live on the server, so every player sees the same ones — the
-  // point of raising one is that the rest of the group learns about it.
-  const loadPetitions = useCallback(async () => {
-    const res = await apiFetch("/goals/petitions");
-    if (res.ok) setPetitions(await res.json());
-  }, []);
-
-  useEffect(() => {
-    loadPetitions().catch(() => {});
-  }, [loadPetitions, goals]);
 
   // Every reading for each goal, so the track can show the whole journey.
   useEffect(() => {
@@ -279,45 +249,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     };
   }, [goals]);
 
-  const openPetition = (goalId: string) =>
-    petitions.find((p) => p.goalId === goalId && p.status === "open") ?? null;
-
-  /** Rule 03: live once someone else has signed it off. */
-  const signOffAt = (goal: Goal) => goal.approvedAt ?? signedOff[goal.id] ?? null;
-
-  /** Runs an action, surfacing whatever the server said if it says no. */
-  const act = async (goalId: string, run: () => Promise<Response>, onOk: (body: any) => void) => {
-    setBusy(goalId);
-    try {
-      const res = await run();
-      const body = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setError(null);
-        onOk(body);
-      } else {
-        setError(body.error ?? "That didn't go through.");
-      }
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const approve = (goal: Goal) =>
-    act(
-      goal.id,
-      () => apiFetch(`/goals/${goal.id}/approve`, { method: "POST" }),
-      (body) => setSignedOff((prev) => ({ ...prev, [goal.id]: body.approvedAt }))
-    );
-
-  const raisePetition = (goal: Goal) =>
-    act(
-      goal.id,
-      () => apiFetch(`/goals/${goal.id}/petitions`, { method: "POST", body: "{}" }),
-      () => {
-        loadPetitions().catch(() => {});
-      }
-    );
-
   const submitReading = async (goal: Goal) => {
     const value = Number(reading);
     if (!Number.isFinite(value)) return;
@@ -326,12 +257,15 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value }),
     });
+    const body = await res.json().catch(() => ({}));
     if (res.ok) {
-      const body = await res.json();
+      setError(null);
       // The server owns the row's id and timestamp, so re-read rather than
       // guess — a fabricated step would sit at the wrong date on the track.
       goalReadings().then(setReadings).catch(() => {});
       if (body.completed && !goal.isCompleted) onUpdateGoal({ ...goal, isCompleted: true });
+    } else {
+      setError(body.error ?? "That reading didn't go through.");
     }
     setLogging(null);
     setReading("");
@@ -349,7 +283,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     [goals, selectedUserId]
   );
 
-  /** Rule 04: your goals are yours to set. Everyone else's are read-only. */
+  /** Rule 01: your goals are yours to set. Everyone else's are read-only. */
   const isMine = currentUser?.id === selectedUserId;
 
   // Rule 01, checked as you type so the rejection isn't a surprise on submit.
@@ -450,35 +384,9 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
               <p className="text-xs text-ink-muted mt-0.5">
                 {goal.category}
                 {goal.target ? ` · target ${goal.target}` : ""}
-                {signOffAt(goal) ? " · signed off" : ""}
               </p>
 
-              {/* Rule 03: it isn't live until someone else signs it off. */}
-              {!signOffAt(goal) ? (
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.1em]
-                                   text-skip-700 bg-skip-50 border border-skip-100 rounded-md px-2 py-1">
-                    <Lock size={11} /> Not live
-                  </span>
-                  {isMine ? (
-                    <span className="text-xs text-ink-muted">
-                      Another player has to sign this off before it counts.
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => approve(goal)}
-                      disabled={busy === goal.id}
-                      className="min-h-[44px] px-3 -my-1.5 rounded-lg text-xs font-semibold text-ink
-                                 border border-line bg-paper-card cursor-pointer inline-flex items-center gap-1.5
-                                 transition-colors duration-150 ease-settle hover:bg-clean-50 hover:border-clean-500
-                                 hover:text-clean-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Stamp size={13} /> Sign off {selected.name}'s goal
-                    </button>
-                  )}
-                </div>
-              ) : null}
-              {measured ? <GoalTrack goal={goal} readings={readings[goal.id] ?? []} /> : null}
+              {measured ?<GoalTrack goal={goal} readings={readings[goal.id] ?? []} /> : null}
 
               {logging === goal.id ? (
                 <div className="mt-2 flex gap-2">
@@ -507,26 +415,11 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                     : `Reaching ${goal.targetValue}${goal.unit ? ` ${goal.unit}` : ""} completes this goal. Nothing else does.`}
                 </p>
               ) : null}
-
-              {(() => {
-                const petition = openPetition(goal.id);
-                if (!petition) return null;
-                return (
-                  <p className="text-xs text-clean-700 bg-clean-50 border border-clean-100 rounded-lg
-                                px-2.5 py-2 mt-2 leading-relaxed">
-                    <strong className="font-semibold">
-                      {petition.raisedByName} petitioned to replace this
-                    </strong>{" "}
-                    on {new Date(petition.raisedAt).toLocaleDateString()}. Set a meeting time. Only
-                    people who attend get a vote, and a tie keeps this goal.
-                  </p>
-                );
-              })()}
             </div>
             {isMine ? (
               <>
                 {/*
-                  Rule 06 gives the title to the most goals completed AT TARGET,
+                  Rule 05 gives the title to the most goals completed AT TARGET,
                   so a measured goal has no tick — the reading is what completes
                   it, and the server refuses a hand-tick either way. Goals from
                   before the numbers existed keep the toggle.
@@ -563,23 +456,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                     <Check size={15} />
                   </button>
                 )}
-                {/* Rule 04: a goal can only be swapped out once it is completed. */}
-                {goal.isCompleted ? (
-                  <button
-                    onClick={() => raisePetition(goal)}
-                    disabled={busy === goal.id || openPetition(goal.id) !== null}
-                    title={
-                      openPetition(goal.id)
-                        ? "A petition is already open on this goal"
-                        : "Petition the group to replace this goal"
-                    }
-                    className="min-w-[44px] min-h-[44px] grid place-items-center rounded-lg bg-paper-sunk text-ink-muted
-                               cursor-pointer transition-colors duration-150 ease-settle
-                               hover:bg-clean-100 hover:text-clean-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Gavel size={15} />
-                  </button>
-                ) : null}
                 <button
                   onClick={() => onDeleteGoal(goal.id)}
                   title="Delete goal"

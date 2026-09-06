@@ -866,7 +866,6 @@ app.get("/api/goals", async (req, res) => {
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
       targetValue: row.target_value != null ? Number(row.target_value) : undefined,
       unit: row.unit,
-      approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -900,7 +899,6 @@ app.get("/api/goals/user/:userId", async (req, res) => {
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
       targetValue: row.target_value != null ? Number(row.target_value) : undefined,
       unit: row.unit,
-      approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -952,133 +950,6 @@ app.get("/api/goals/progress", async (req, res) => {
   }
 });
 
-/**
- * Rule 03: a goal is live once the group signs off.
- *
- * The inverse of denyUnlessOwner — signing off on your own goal is not a
- * sign-off, so the caller has to be a different player. Any of the nine will
- * do; this group is small enough that a quorum is a meeting, not a table.
- */
-async function denyUnlessAnotherPlayer(req, res, ownerId) {
-  const actor = actorOf(req);
-  if (!actor) {
-    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
-    return true;
-  }
-  if (actor === ownerId) {
-    res.status(403).json({ error: "Sign-off comes from someone else. You can't approve your own goal." });
-    return true;
-  }
-  const player = await db.get("SELECT id FROM users WHERE id = ?", [actor]);
-  if (!player) {
-    res.status(403).json({ error: "Only a player in this season can sign off a goal" });
-    return true;
-  }
-  return false;
-}
-
-// Rule 03: another player signs the goal off and it goes live. Idempotent — the
-// first signature is the one that counts, a second changes nothing.
-app.post("/api/goals/:id/approve", async (req, res) => {
-  try {
-    const goal = await db.get("SELECT user_id, approved_at FROM goals WHERE id = ?", [req.params.id]);
-    if (!goal) {
-      res.status(404).json({ error: "Goal not found" });
-      return;
-    }
-    if (await denyUnlessAnotherPlayer(req, res, goal.user_id)) return;
-
-    const approvedAt = goal.approved_at || new Date().toISOString();
-    if (!goal.approved_at) {
-      await db.run("UPDATE goals SET approved_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
-        approvedAt,
-        req.params.id,
-      ]);
-    }
-    res.json({ id: req.params.id, approvedAt, approvedBy: actorOf(req) });
-  } catch (err) {
-    console.error("Error approving goal:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-const petitionRow = (r) => ({
-  id: r.id,
-  goalId: r.goal_id,
-  raisedBy: r.raised_by,
-  raisedByName: r.raised_by_name,
-  reason: r.reason,
-  status: r.status,
-  raisedAt: r.raised_at,
-});
-
-// Every open petition in the season, so the board shows the same thing to
-// everyone. Registered above /api/goals/:id so Express doesn't read
-// "petitions" as a goal id.
-app.get("/api/goals/petitions", async (req, res) => {
-  try {
-    const rows = await db.all(
-      `SELECT p.*, u.name AS raised_by_name
-       FROM petitions p JOIN users u ON p.raised_by = u.id
-       ORDER BY p.raised_at DESC`
-    );
-    res.json(rows.map(petitionRow));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * Rule 04: a completed goal may be replaced by petition.
- *
- * Raising it is the whole record kept here — who asked, against which goal,
- * when. The vote itself happens in the room: only people who attend get one,
- * and a tie keeps the original.
- *
- * ponytail: no ballot table. Add one when the group actually votes in the app
- * rather than in person.
- */
-app.post("/api/goals/:id/petitions", async (req, res) => {
-  try {
-    const goal = await db.get("SELECT user_id, is_completed FROM goals WHERE id = ?", [req.params.id]);
-    if (!goal) {
-      res.status(404).json({ error: "Goal not found" });
-      return;
-    }
-    if (denyUnlessOwner(req, res, goal.user_id)) return;
-    if (!goal.is_completed) {
-      res.status(400).json({ error: "Only a completed goal can be replaced. Finish this one first." });
-      return;
-    }
-
-    const open = await db.get("SELECT id FROM petitions WHERE goal_id = ? AND status = 'open'", [
-      req.params.id,
-    ]);
-    if (open) {
-      res.status(409).json({ error: "A petition is already open on this goal" });
-      return;
-    }
-
-    const id = uuidv4();
-    const raisedAt = new Date().toISOString();
-    const reason = req.body?.reason ? String(req.body.reason).slice(0, 200) : null;
-    await db.run(
-      "INSERT INTO petitions (id, goal_id, raised_by, reason, status, raised_at) VALUES (?, ?, ?, ?, 'open', ?)",
-      [id, req.params.id, goal.user_id, reason, raisedAt]
-    );
-
-    const row = await db.get(
-      `SELECT p.*, u.name AS raised_by_name
-       FROM petitions p JOIN users u ON p.raised_by = u.id WHERE p.id = ?`,
-      [id]
-    );
-    res.status(201).json(petitionRow(row));
-  } catch (err) {
-    console.error("Error raising petition:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get("/api/goals/:id", async (req, res) => {
   try {
     const row = await db.get(`SELECT * FROM goals WHERE id = ?`, [
@@ -1100,7 +971,6 @@ app.get("/api/goals/:id", async (req, res) => {
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
       targetValue: row.target_value != null ? Number(row.target_value) : undefined,
       unit: row.unit,
-      approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -1320,7 +1190,6 @@ app.put("/api/goals/:id", async (req, res) => {
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
       targetValue: row.target_value != null ? Number(row.target_value) : undefined,
       unit: row.unit,
-      approvedAt: row.approved_at,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -1600,8 +1469,7 @@ app.post("/api/goals/:id/progress", async (req, res) => {
       [uuidv4(), req.params.id, goal.user_id, numeric, note ? String(note).slice(0, 200) : null, recordedAt]
     );
 
-    // Hitting the target completes the goal; the group still has to approve any
-    // replacement (Rule 04), so nothing else changes here.
+    // Hitting the target completes the goal. Nothing else changes here.
     const fraction = progressFraction(baseline, target, numeric);
     const reached = fraction === 1;
     if (reached && !goal.is_completed) {

@@ -36,7 +36,7 @@ const WALKED = [3, 4];
  * weeks   — workouts logged per week
  * pays    — "all" settles every fine, "none" settles nothing,
  *           or an array of the weeks whose fines get settled
- * goals   — [description, category, completed?, approved?, baseline, target, unit]
+ * goals   — [description, category, completed?, baseline, target, unit]
  */
 const PLAYERS = [
   {
@@ -47,8 +47,8 @@ const PLAYERS = [
     weeks: Array(10).fill(CLEAN),
     pays: "all",
     goals: [
-      ["Deadlift 100kg", "strength", true, true, 70, 100, "kg"],
-      ["Half marathon under 2h", "endurance", false, true, 150, 120, "min"],
+      ["Deadlift 100kg", "strength", true, 70, 100, "kg"],
+      ["Half marathon under 2h", "endurance", false, 150, 120, "min"],
     ],
   },
   {
@@ -59,9 +59,9 @@ const PLAYERS = [
     weeks: [...Array(9).fill(CLEAN), MISS],
     pays: "none",
     goals: [
-      ["Bench 80kg for 5", "strength", false, true, 60, 80, "kg"],
-      ["Swim 1km non-stop", "cardio", false, true, 300, 1000, "m"],
-      ["Play squash 15 times", "sports", false, true, 0, 15, "games"],
+      ["Bench 80kg for 5", "strength", false, 60, 80, "kg"],
+      ["Swim 1km non-stop", "cardio", false, 300, 1000, "m"],
+      ["Play squash 15 times", "sports", false, 0, 15, "games"],
     ],
   },
   {
@@ -72,12 +72,12 @@ const PLAYERS = [
     weeks: [CLEAN, CLEAN, MISS, ...Array(7).fill(CLEAN)],
     pays: "none",
     goals: [
-      ["Run 5k every week", "cardio", true, true, 0, 10, "runs"],
-      ["20 pull-ups in a set", "strength", true, true, 8, 20, "reps"],
-      ["Cycle 200km total", "endurance", false, true, 0, 200, "km"],
-      ["Yoga 30 sessions", "mobility", false, true],
-      ["Plank 3 minutes", "core", false, true],
-      ["Climb 20 routes", "sports", false, true],
+      ["Run 5k every week", "cardio", true, 0, 10, "runs"],
+      ["20 pull-ups in a set", "strength", true, 8, 20, "reps"],
+      ["Cycle 200km total", "endurance", false, 0, 200, "km"],
+      ["Yoga 30 sessions", "mobility", false],
+      ["Plank 3 minutes", "core", false],
+      ["Climb 20 routes", "sports", false],
     ],
   },
   {
@@ -88,9 +88,9 @@ const PLAYERS = [
     weeks: [...Array(7).fill(CLEAN), MISS, MISS, MISS],
     pays: "all",
     goals: [
-      ["Squat bodyweight x10", "strength", true, true, 4, 10, "reps"],
-      ["Sub-25 minute 5k", "cardio", true, true, 31, 25, "min"],
-      ["Box 12 sessions", "sports", true, true],
+      ["Squat bodyweight x10", "strength", true, 4, 10, "reps"],
+      ["Sub-25 minute 5k", "cardio", true, 31, 25, "min"],
+      ["Box 12 sessions", "sports", true],
     ],
   },
   {
@@ -101,10 +101,10 @@ const PLAYERS = [
     weeks: [MISS, MISS, MISS, MISS, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN],
     pays: "all",
     goals: [
-      ["Muscle-up unassisted", "strength", false, true, 0, 1, "reps"],
-      ["Walk 10k steps daily", "consistency", false, true],
-      ["Stretch every morning", "mobility", false, true],
-      ["Badminton 20 games", "sports", false, true],
+      ["Muscle-up unassisted", "strength", false, 0, 1, "reps"],
+      ["Walk 10k steps daily", "consistency", false],
+      ["Stretch every morning", "mobility", false],
+      ["Badminton 20 games", "sports", false],
     ],
   },
   {
@@ -115,10 +115,10 @@ const PLAYERS = [
     weeks: [MISS, MISS, MISS, CLEAN, CLEAN, WALKED, CLEAN, WALKED, CLEAN, CLEAN],
     pays: "all",
     goals: [
-      ["Row 2km under 8 minutes", "cardio", true, true, 9.5, 8, "min"],
-      ["Overhead press 50kg", "strength", false, true, 35, 50, "kg"],
-      ["Football 25 games", "sports", false, true],
-      ["Sleep-free rest days logged", "consistency", false, true],
+      ["Row 2km under 8 minutes", "cardio", true, 9.5, 8, "min"],
+      ["Overhead press 50kg", "strength", false, 35, 50, "kg"],
+      ["Football 25 games", "sports", false],
+      ["Sleep-free rest days logged", "consistency", false],
     ],
   },
   {
@@ -129,11 +129,11 @@ const PLAYERS = [
     weeks: [MISS, CLEAN, MISS, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN],
     pays: "none",
     goals: [
-      ["Cycle to work 40 times", "consistency", false, true],
-      ["Hike 5 trails", "endurance", false, true],
-      ["Push-ups 100 in a day", "strength", false, true],
-      ["Table tennis 15 games", "sports", false, true],
-      ["Cold plunge 20 times", "recovery", false, true],
+      ["Cycle to work 40 times", "consistency", false],
+      ["Hike 5 trails", "endurance", false],
+      ["Push-ups 100 in a day", "strength", false],
+      ["Table tennis 15 games", "sports", false],
+      ["Cold plunge 20 times", "recovery", false],
     ],
   },
   {
@@ -144,8 +144,8 @@ const PLAYERS = [
     weeks: [CLEAN, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN, CLEAN, CLEAN, CLEAN],
     pays: "all",
     goals: [
-      ["Lead climb 6b", "sports", false, true, 0, 6, "grade"],
-      ["Hangboard 3x a week", "strength", false, true],
+      ["Lead climb 6b", "sports", false, 0, 6, "grade"],
+      ["Hangboard 3x a week", "strength", false],
     ],
   },
   {
@@ -156,8 +156,8 @@ const PLAYERS = [
     weeks: [CLEAN, MISS, WALKED, MISS, CLEAN, WALKED, CLEAN, CLEAN, CLEAN, MISS],
     pays: [4],
     goals: [
-      ["Swim 100 lengths", "endurance", false, false, 20, 100, "lengths"],
-      ["Bench bodyweight", "strength", false, false],
+      ["Swim 100 lengths", "endurance", false, 20, 100, "lengths"],
+      ["Bench bodyweight", "strength", false],
     ],
   },
 ];
@@ -258,12 +258,12 @@ async function seed() {
     );
 
     for (const goal of player.goals) {
-      const [description, category, completed, approved, baselineValue, targetValue, unit] = goal;
+      const [description, category, completed, baselineValue, targetValue, unit] = goal;
       const goalId = uuidv4();
       await db.run(
         `INSERT INTO goals (id, user_id, category, description, baseline, target,
-          baseline_value, target_value, unit, approved_at, is_completed, completed_date, created_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          baseline_value, target_value, unit, is_completed, completed_date, created_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           goalId,
           player.id,
@@ -274,7 +274,6 @@ async function seed() {
           baselineValue ?? null,
           targetValue ?? null,
           unit ?? null,
-          approved ? "2026-01-18" : null,
           completed ? 1 : 0,
           completed ? "2026-03-01" : null,
           "2026-01-18",

@@ -30,7 +30,7 @@ const DDL = `
     baseline_value REAL,
     target_value REAL,
     unit TEXT,
-    approved_at TEXT,
+    approved_at TEXT, -- vestigial: goals need no sign-off; kept so existing databases are untouched
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     completed_date TEXT,
     created_date TEXT NOT NULL,
@@ -46,16 +46,6 @@ const DDL = `
     recorded_at TEXT NOT NULL,
     FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS petitions (
-    id TEXT PRIMARY KEY,
-    goal_id TEXT NOT NULL,
-    raised_by TEXT NOT NULL,
-    reason TEXT,
-    status TEXT NOT NULL DEFAULT 'open',
-    raised_at TEXT NOT NULL,
-    FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE CASCADE,
-    FOREIGN KEY (raised_by) REFERENCES users (id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS workout_days (
     id TEXT PRIMARY KEY,
@@ -118,7 +108,6 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week);
   CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id);
   CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON goal_progress (goal_id, recorded_at);
-  CREATE INDEX IF NOT EXISTS idx_petitions_goal ON petitions (goal_id);
   CREATE INDEX IF NOT EXISTS idx_fines_user ON fines (user_id);
   CREATE INDEX IF NOT EXISTS idx_fines_unsettled ON fines (user_id, settled_at);
 `;
