@@ -55,7 +55,7 @@ let initPromise = null;
 async function runDatabaseInit() {
   console.log("🚀 Initializing database...");
 
-  const { DDL } = require("./schema");
+  const { DDL, INDEXES } = require("./schema");
   const ddl = DDL;
 
   // libsql/client supports executeMultiple for batched multi-statement SQL
@@ -79,6 +79,20 @@ async function runDatabaseInit() {
   // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
   // CREATE TABLE IF NOT EXISTS won't add columns to a table that already exists.
   const addColumns = [
+    // A database that predates FitBros 3.0 has the tables but not these columns,
+    // and CREATE TABLE IF NOT EXISTS will not add them. Duplicates are ignored
+    // below, so this is safe to run against a fresh database too.
+    "ALTER TABLE users ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN standing TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE users ADD COLUMN cutoff_hour INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN week_end_day INTEGER NOT NULL DEFAULT 7",
+    "ALTER TABLE goals ADD COLUMN points INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE goals ADD COLUMN approved_at TEXT",
+    "ALTER TABLE fines ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE fines ADD COLUMN issued_at TEXT",
+    "ALTER TABLE fines ADD COLUMN due_at TEXT",
+    "ALTER TABLE fines ADD COLUMN settled_at TEXT",
+    "ALTER TABLE fines ADD COLUMN waived_by_token_id TEXT",
     "ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE goals ADD COLUMN baseline_value REAL",
     "ALTER TABLE goals ADD COLUMN target_value REAL",
@@ -93,6 +107,15 @@ async function runDatabaseInit() {
       if (!String(err.message).includes("duplicate column")) {
         console.error("Migration note:", err.message);
       }
+    }
+  }
+
+  // Indexes last: some of them cover columns the ALTERs above just added.
+  if (typeof db.execMultiple === "function") {
+    await db.execMultiple(INDEXES);
+  } else {
+    for (const stmt of INDEXES.split(";").map((s) => s.trim()).filter(Boolean)) {
+      await db.exec(stmt);
     }
   }
 
@@ -1510,19 +1533,20 @@ app.post("/api/weekly-plans", async (req, res) => {
       return;
     }
 
-    if (!isAdminOverride && weekNum === currentWeek) {
-      res.status(403).json({
-        error:
-          "Commitment window closed — plans for this week had to be set by Sunday 23:59 IST of the prior week",
-        lockReason: "deadline-passed",
-      });
-      return;
-    }
-
     const existing = await db.get(
       `SELECT id, committed_at, swaps_used FROM weekly_plans WHERE user_id = ? AND week = ?`,
       [userId, weekNum]
     );
+
+    // The week you are in can be planned, but only once: after that Rule 06 owns
+    // the changes, so rewriting the plan cannot be used to dodge the one swap.
+    if (!isAdminOverride && existing && weekNum === currentWeek) {
+      res.status(403).json({
+        error: "Your plan for this week is already set — move a day with your swap",
+        lockReason: "already-committed",
+      });
+      return;
+    }
 
     const id = existing?.id || uuidv4();
     const committedAt = existing?.committed_at || new Date().toISOString();
@@ -1566,8 +1590,20 @@ app.delete("/api/weekly-plans/:userId/:week", async (req, res) => {
     res.status(400).json({ error: "week must be a positive integer" });
     return;
   }
+  if (denyUnlessOwner(req, res, userId)) return;
 
   try {
+    // Rule 06 again: dropping a live plan and re-committing would hand back the
+    // swap you already spent, so only weeks that have not started can be deleted.
+    const currentWeek = await seasonCurrentWeek();
+    if (!isAdminRequest(req) && week <= currentWeek) {
+      res.status(403).json({
+        error: "That week is under way — move a day with your swap instead of dropping the plan",
+        lockReason: "already-committed",
+      });
+      return;
+    }
+
     const result = await db.run(
       `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
       [userId, week]
@@ -1685,6 +1721,14 @@ app.get("/api/settings", async (req, res) => {
  * rewind silently un-bills people; `{"force": true}` says you meant it.
  */
 app.put("/api/settings", async (req, res) => {
+  // Closing a week bills the whole group, so the caller has to say who they are.
+  // Rule 12 leaves the admin seats unassigned, so any player may still do it —
+  // this is the seam a real admin check slots into.
+  if (!isAdminRequest(req) && !actorOf(req)) {
+    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
+    return;
+  }
+
   try {
     const current = await db.get(
       "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"

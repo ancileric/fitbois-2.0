@@ -1,21 +1,22 @@
-# FitBois 2.0 - Challenge Tracker
+# FitBros 3.0 — Season Tracker
 
-A full-stack fitness challenge tracking app built for the FitBois 2.0 6-month fitness challenge.
+A 24-week fitness accountability season for a group of friends, with real money
+attached. The rules are the product; the app only reports what the rules decide.
 
-**Live:** [fitbois-v2.vercel.app](https://fitbois-v2.vercel.app)
+## The season
 
-## Challenge Overview
-
-**Focus:** Consistency and personal progress — not who's already the fittest, but who actually shows up and improves.
-
-**Timeline:** January 19 – July 31, 2026 (~6 months)
-**Buy-in:** ₹5,000 per person
+**Timeline:** 24 weeks · **Buy-in:** the fines you pay
 
 ### Rules
 
-- **Consistency levels:** Everyone starts at 5 workouts/week. Hit 3 consecutive clean weeks to drop to 4/week, then 3/week. Miss a week and you regress back up. Miss 2 weeks at the 5-day level and you're eliminated.
-- **Goals:** 5 goals at a time, one from each category (Cardio, Strength, Consistency, Sports, Personal Growth). At least one must be a real stretch goal.
-- **Scoring:** **2 points** per completed goal + 1 point per clean week + **1 point** per committed week where every committed day is hit (**−1** if any committed day is missed). Most points wins.
+- **A clean week is 5 workouts.** Flat, for everyone.
+- **A missed week costs money** — ₹500 → ₹1,000 → ₹2,000. Three misses at one price raise it; three clean weeks lower it.
+- **Missing never eliminates you. Not paying does.** Active → Suspended (unpaid past 48h) → Out (two fines while suspended). No buy-backs.
+- **Skip tokens:** 3 a season, never 3 in a row, never in the last two weeks.
+- **Goals:** 6 points across 2–6 goals, worth 3/2/1. Physical, numbered, provable.
+- **The pot** splits between everyone still standing with nothing outstanding. A fined week does not cost you a share.
+
+The full 12 rules live in the app under **Rules**, and in `src/data/rules.ts`.
 
 ## Tech Stack
 
@@ -87,11 +88,28 @@ To connect to Turso instead of local SQLite, create a `.env` file (see `.env.exa
 
 ### Deploy
 
-The app is configured for Vercel. Push to `main` and Vercel auto-deploys.
+Vercel serves the built React app and runs `backend/server.js` as a serverless
+function through `api/index.js`, so the app and the API share one origin and the
+frontend talks to a relative `/api`. Pushing to `main` deploys production; any
+other branch gets a preview URL.
 
-**Required Vercel environment variables:**
-- `TURSO_DATABASE_URL`
-- `TURSO_AUTH_TOKEN`
+**Required Vercel environment variables**
+
+| Variable | Where it comes from |
+|---|---|
+| `TURSO_DATABASE_URL` | `turso db show <name> --url` |
+| `TURSO_AUTH_TOKEN` | `turso db tokens create <name>` |
+| `ADMIN_KEY` | optional; any secret. Set it and `x-admin-key` bypasses the ownership checks. |
+
+A serverless function has no disk, so the local SQLite file is not an option in
+production — Turso is required. The schema creates itself on the first request
+after a cold start, including the column migrations for a database that predates
+3.0, so there is no separate migration step.
+
+**One caveat before sharing the link:** there is no authentication. `x-player-id`
+is a header the client sets and the "Playing as" picker changes it, so anyone
+with the link can act as anyone. That is fine for a private group and not fine
+for a public URL.
 
 ## API Endpoints
 

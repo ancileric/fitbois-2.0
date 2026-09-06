@@ -129,6 +129,13 @@ const DDL = `
     is_active BOOLEAN NOT NULL DEFAULT 1,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+`;
+
+/**
+ * Indexes run after the column migrations, not with the tables: an index on a
+ * column a pre-3.0 database has not got yet would abort the whole batch.
+ */
+const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id);
   CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week);
   CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id);
@@ -140,4 +147,4 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id);
 `;
 
-module.exports = { DDL };
+module.exports = { DDL, INDEXES };

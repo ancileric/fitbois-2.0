@@ -3,7 +3,7 @@ import {
   AlertTriangle,
   Check,
   IndianRupee,
-  RefreshCw,
+
   ShieldCheck,
   Ticket,
   Trophy,
@@ -500,7 +500,7 @@ const MySeason: React.FC<MySeasonProps> = ({
           week={me.currentWeekProgress.week}
           weekDates={getWeekDates(challengeStartDate, me.currentWeekProgress.week)}
           existingPlan={thisWeekPlan}
-          lockReason={thisWeekPlan ? "deadline-passed" : null}
+          lockReason={thisWeekPlan ? "already-committed" : null}
           swapsUsed={thisWeekPlan?.swapsUsed ?? 0}
           onSave={async (days) => {
             await onUpdateWeeklyPlan({
@@ -512,13 +512,9 @@ const MySeason: React.FC<MySeasonProps> = ({
             setPlanOpen(false);
           }}
           onSwap={async (from, to) => {
-            const res = await fetch(
+            const res = await apiFetch(
               `/weekly-plans/${currentUser.id}/${me.currentWeekProgress.week}/swap`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ from, to }),
-              }
+              { method: "POST", body: JSON.stringify({ from, to }) }
             );
             const body = await res.json().catch(() => ({}));
             if (res.ok) load();

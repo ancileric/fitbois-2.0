@@ -32,6 +32,10 @@
   --skip-600: 128 88 14;
   --skip-700: 101 70 11;
   --shadow: 27 29 25;
+  /* Chart steps: the same two hues, stepped so adjacent marks stay apart under
+     deuteranopia and clear 3:1 on this ground. Validated, not eyeballed. */
+  --chart-clean: 26 122 78;
+  --chart-owed: 168 58 30;
   color-scheme: light;
 }
 
@@ -60,6 +64,10 @@
   --skip-600: 236 192 114;
   --skip-700: 242 209 151;
   --shadow: 0 0 0;
+  /* Re-picked for the dark ground, not flipped — the light steps sit too high
+     in lightness to separate here. */
+  --chart-clean: 69 168 120;
+  --chart-owed: 207 91 64;
   color-scheme: dark;
 }
 

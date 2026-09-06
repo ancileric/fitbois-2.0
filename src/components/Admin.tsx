@@ -6,7 +6,7 @@ import {
   Trash2,
   UserPlus,
   RotateCcw,
-  UserCheck,
+
   CalendarPlus
 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';

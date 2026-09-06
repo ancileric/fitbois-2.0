@@ -7,7 +7,7 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export type PlanLockReason =
   | "past-week"
-  | "deadline-passed"
+  | "already-committed"
   | "workout-logged"
   | null;
 
@@ -84,8 +84,8 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
     switch (lockReason) {
       case "past-week":
         return "This week has already ended — plans can only be set for the current or future weeks.";
-      case "deadline-passed":
-        return "Plans for the current week had to be set by Sunday 23:59 IST of the prior week. Your plan is locked.";
+      case "already-committed":
+        return "Your plan for this week is set. Rule 06: one swap a week, applied before the day starts.";
       case "workout-logged":
         return "A workout has already been logged for this week, so the plan is locked.";
       default:
@@ -179,10 +179,9 @@ const WeeklyPlanModal: React.FC<WeeklyPlanModalProps> = ({
 
         {!isLocked && (
           <p className="text-sm text-ink-muted mb-4 mt-3">
-            Pick the days you'll hit. Hit every committed day to earn{" "}
-            <span className="font-semibold text-primary-600">+1 point</span>{" "}
-            for the week. Miss any of them and you{" "}
-            <span className="font-semibold text-owed-600">lose 1 point</span>.
+            Pick the days you'll hit. The plan is yours to keep to — what pays is the{" "}
+            <span className="font-semibold text-ink">{required} workouts</span>. Once it's set,
+            one swap a week moves a day.
           </p>
         )}
 

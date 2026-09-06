@@ -12,6 +12,7 @@ import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
 import { apiService } from "./services/api";
+import { apiFetch } from "./services/http";
 
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
@@ -124,10 +125,9 @@ function AppContent() {
 
   // One clock for the whole app: the week the server is scoring against.
   useEffect(() => {
-    const api = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
-    fetch(`${api}/settings`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((settings) => {
+    apiFetch(`/settings`)
+      .then((res: Response) => (res.ok ? res.json() : null))
+      .then((settings: { currentWeek?: number } | null) => {
         if (settings?.currentWeek) {
           setAdminSettings((prev) => ({ ...prev, ...settings }));
         }

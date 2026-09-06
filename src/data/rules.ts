@@ -161,8 +161,9 @@ export const RULE_STAGES: RuleStage[] = [
         "id": "r6",
         "number": "06",
         "title": "Swaps",
-        "summary": "One a week. Apply before the day starts.",
+        "summary": "Set the week once. One swap a week, before the day starts.",
         "paragraphs": [
+          "Commit the days you plan to train. The week you are in can be planned once; after that the plan stands, and the swap is the only way to move a day. Weeks that have not started yet can be rewritten freely.",
           "Substitute one session for an equivalent. Before the day starts, never after. You can opt out of the scheduling system entirely and just not use swaps."
         ],
         "points": [],

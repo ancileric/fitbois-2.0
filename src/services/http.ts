@@ -7,7 +7,14 @@
  * would go once there is one.
  */
 
-export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+/**
+ * In production the API is served from the same origin as the app, so a
+ * relative path is right and a baked-in dev address (a LAN IP, say) is wrong.
+ */
+export const API_BASE =
+  process.env.NODE_ENV === "production"
+    ? "/api"
+    : process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 /** Kept in localStorage by the player picker in the header. */
 export const currentPlayerId = (): string | null => {

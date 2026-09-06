@@ -3,6 +3,7 @@ import { RefreshCw, Share2, Trophy } from "lucide-react";
 import { User } from "../types";
 import Feed from "./Feed";
 import PlayerSheet from "./PlayerSheet";
+import GroupStats from "./GroupStats";
 import { shareCard } from "../utils/shareCard";
 import { apiFetch } from "../services/http";
 import { SEASON_WEEKS } from "../utils/seasonEngine";
@@ -346,6 +347,10 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
         </div>
       </section>
       {openPlayer ? <PlayerSheet userId={openPlayer} onClose={() => setOpenPlayer(null)} /> : null}
+
+      <section className="pt-4 border-t border-line">
+        <GroupStats rows={rows} currentUserId={currentUser?.id} />
+      </section>
 
       <section className="pt-2">
         <h3 className="display text-2xl mb-1">Lately</h3>
