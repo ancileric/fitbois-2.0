@@ -5,6 +5,8 @@
  * out for a phone conversation rather than being a photo of a web page.
  */
 
+import { FINE_BASE } from "./seasonEngine";
+
 export interface ShareRow {
   name: string;
   cleanWeeks: number;
@@ -128,7 +130,11 @@ export const drawShareCard = (input: ShareCardInput): HTMLCanvasElement => {
 
   ctx.fillStyle = PALETTE.muted;
   ctx.font = "400 11px system-ui, -apple-system, sans-serif";
-  ctx.fillText("A missed week costs ₹500 → ₹2,000. Pay up and you keep your share.", pad, height - 22);
+  ctx.fillText(
+    `A missed week costs ${rupees(FINE_BASE)}, doubling every two misses. Pay up and you keep your share.`,
+    pad,
+    height - 22
+  );
 
   return canvas;
 };

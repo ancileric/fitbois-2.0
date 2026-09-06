@@ -48,6 +48,8 @@ export interface SeasonInput {
   settledWeeks?: number[];
   /** Weeks completed so far; the in-progress week is not judged. */
   completedWeeks: number;
+  /** The first week this player was in the season. Earlier weeks are not theirs. */
+  fromWeek?: number;
 }
 
 /** A clean week is 5 workouts' worth of credit. Flat for everyone, every week. */

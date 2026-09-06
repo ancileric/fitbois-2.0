@@ -774,6 +774,13 @@ app.post("/api/workouts", async (req, res) => {
       `Upserted workout for user ${userId}, week ${weekNum}, day ${dayNum}`
     );
 
+    // The sheet just changed, so the fines on record may no longer match it — a
+    // week that became clean must stop being billed the moment it does, not the
+    // next time someone closes a week.
+    await syncFines(userId).catch((err) =>
+      console.error("Fine sync after workout write failed:", err.message)
+    );
+
     const workout = {
       id,
       userId,
@@ -814,6 +821,10 @@ app.delete("/api/workouts/:id", async (req, res) => {
       res.status(404).json({ error: "Workout not found" });
       return;
     }
+
+    await syncFines(row.user_id).catch((err) =>
+      console.error("Fine sync after workout delete failed:", err.message)
+    );
 
     debug(`Deleted workout ID: ${req.params.id}`);
     res.json({ message: "Workout deleted successfully" });
@@ -1554,14 +1565,28 @@ app.get("/api/feed", async (req, res) => {
  * Everything the season engine needs about one player, read from the raw record.
  * Fines are derived, never trusted from a stored column — the sheet is the truth.
  */
+/**
+ * Which season week a player's first one is.
+ *
+ * Someone who joins in week 11 owes nothing for the ten weeks they were not in.
+ * Their start date against the season's start date is the only record of that.
+ */
+function joinedAtWeek(playerStart, seasonStart) {
+  if (!playerStart || !seasonStart) return 1;
+  const days = (Date.parse(playerStart) - Date.parse(seasonStart)) / 86400000;
+  if (!Number.isFinite(days) || days <= 0) return 1;
+  return Math.floor(days / 7) + 1;
+}
+
 async function loadSeason(userId) {
-  const [workoutRows, fineRows, settings] = await Promise.all([
+  const [workoutRows, fineRows, settings, player] = await Promise.all([
     db.all(
       "SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days WHERE user_id = ?",
       [userId]
     ),
     db.all("SELECT week, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL", [userId]),
-    db.get("SELECT current_week FROM admin_settings WHERE id = 1"),
+    db.get("SELECT current_week, challenge_start_date FROM admin_settings WHERE id = 1"),
+    db.get("SELECT start_date FROM users WHERE id = ?", [userId]),
   ]);
 
   const currentWeek = settings ? Number(settings.current_week) : 1;
@@ -1579,6 +1604,7 @@ async function loadSeason(userId) {
     workoutDays,
     settledWeeks: fineRows.filter((r) => r.settled_at).map((r) => Number(r.week)),
     completedWeeks: Math.max(0, currentWeek - 1),
+    fromWeek: joinedAtWeek(player?.start_date, settings?.challenge_start_date),
   });
 
   return { state, currentWeek, workoutRows };
@@ -1616,8 +1642,14 @@ async function syncFines(userId) {
       voided.push({ week, amount: Number(row.amount), wasSettled: Boolean(row.settled_at) });
       known.delete(week);
     } else if (Number(row.amount) !== owedNow && !row.settled_at) {
-      // The price of that week can change when earlier weeks are edited.
-      await db.run("UPDATE fines SET amount = ? WHERE id = ?", [owedNow, row.id]);
+      // The price of that week can change when earlier weeks are edited — and the
+      // level moves with the amount, or the row reports ₹400 at level 1.
+      const level = state.weeks.find((w) => w.week === week)?.priceLevel ?? 1;
+      await db.run("UPDATE fines SET amount = ?, price_level = ? WHERE id = ?", [
+        owedNow,
+        level,
+        row.id,
+      ]);
     }
   }
 
@@ -1711,13 +1743,13 @@ const groupByUser = (rows) => {
 app.get("/api/seasons", async (req, res) => {
   try {
     const [users, workoutRows, fineRows, settings] = await Promise.all([
-      db.all("SELECT id, name FROM users ORDER BY name COLLATE NOCASE ASC"),
+      db.all("SELECT id, name, start_date FROM users ORDER BY name COLLATE NOCASE ASC"),
       db.all("SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days"),
       db.all(
         `SELECT user_id, id, week, amount, settled_at, issued_at, due_at
          FROM fines WHERE voided_at IS NULL ORDER BY week DESC`
       ),
-      db.get("SELECT current_week FROM admin_settings WHERE id = 1"),
+      db.get("SELECT current_week, challenge_start_date FROM admin_settings WHERE id = 1"),
     ]);
 
     const currentWeek = settings ? Number(settings.current_week) : 1;
@@ -1741,6 +1773,7 @@ app.get("/api/seasons", async (req, res) => {
           })),
           settledWeeks: fines.filter((r) => r.settled_at).map((r) => Number(r.week)),
           completedWeeks,
+          fromWeek: joinedAtWeek(user.start_date, settings?.challenge_start_date),
         });
 
         return seasonView(

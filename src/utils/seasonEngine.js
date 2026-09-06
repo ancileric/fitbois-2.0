@@ -76,6 +76,7 @@ const runSeason = ({
   workoutDays,
   settledWeeks = [],
   completedWeeks,
+  fromWeek = 1,
 }) => {
   let priceLevel = 1;
   let cleanStreak = 0;
@@ -88,7 +89,9 @@ const runSeason = ({
 
   const weeks = [];
 
-  for (let week = 1; week <= completedWeeks; week++) {
+  // A player is judged from the week they joined. Nobody is fined for the weeks
+  // the season ran before they were in it.
+  for (let week = Math.max(1, fromWeek); week <= completedWeeks; week++) {
     const credits = creditsIn(userId, workoutDays, week);
 
     if (credits >= WORKOUTS_PER_WEEK) {

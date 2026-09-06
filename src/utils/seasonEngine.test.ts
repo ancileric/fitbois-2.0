@@ -177,6 +177,28 @@ describe('what is owed', () => {
     expect(clear.potEligible).toBe(true);
   });
 
+  test('a player is not billed for the weeks before they joined', () => {
+    // Someone added in week 9 of a season that has closed 10 weeks answers for
+    // weeks 9 and 10, not for the eight that ran without them.
+    const joined = runSeason({
+      userId: 'u1',
+      workoutDays: [],
+      completedWeeks: 10,
+      fromWeek: 9,
+    });
+    expect(joined.weeks.map((w) => w.week)).toEqual([9, 10]);
+    expect(joined.billed).toBe(400);
+
+    const founder = season(Array(10).fill(0));
+    expect(founder.weeks).toHaveLength(10);
+    expect(founder.billed).toBeGreaterThan(joined.billed);
+  });
+
+  test('a joiner starts at the cheapest price, not the group\'s', () => {
+    const joined = runSeason({ userId: 'u1', workoutDays: [], completedWeeks: 10, fromWeek: 10 });
+    expect(joined.weeks[0].fine).toBe(FINE_BASE);
+  });
+
   test('missing never ends the season — every week is still replayed', () => {
     const s = season(Array(10).fill(0));
     expect(s.weeks).toHaveLength(10);
