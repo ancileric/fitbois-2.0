@@ -8,24 +8,24 @@ const Toast: React.FC = () => {
   const getIcon = (type: ToastType) => {
     switch (type) {
       case "success":
-        return <CheckCircle className="w-5 h-5 text-green-500" />;
+        return <CheckCircle className="w-5 h-5 text-clean-600" />;
       case "error":
         return <XCircle className="w-5 h-5 text-owed-500" />;
       case "info":
       default:
-        return <Info className="w-5 h-5 text-blue-500" />;
+        return <Info className="w-5 h-5 text-ink-muted" />;
     }
   };
 
   const getStyles = (type: ToastType) => {
     switch (type) {
       case "success":
-        return "bg-clean-50 border-green-200 text-green-800";
+        return "bg-clean-50 border-clean-100 text-clean-700";
       case "error":
-        return "bg-owed-50 border-red-200 text-red-800";
+        return "bg-owed-50 border-owed-100 text-owed-700";
       case "info":
       default:
-        return "bg-blue-50 border-blue-200 text-ink";
+        return "bg-paper-sunk border-line text-ink";
     }
   };
 

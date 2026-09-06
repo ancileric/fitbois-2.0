@@ -14,7 +14,7 @@
 export const API_BASE =
   process.env.NODE_ENV === "production"
     ? "/api"
-    : process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+    : process.env.REACT_APP_API_URL || "http://localhost:5050/api";
 
 /**
  * The admin key.
@@ -75,19 +75,26 @@ export const apiFetch = (path: string, init: RequestInit = {}): Promise<Response
   return fetch(url, { ...init, headers });
 };
 
+/** One logged reading, exactly as the server stores it. */
+export interface Reading {
+  id: string;
+  value: number;
+  note: string | null;
+  recordedAt: string;
+}
+
 /**
- * The newest reading for every goal, keyed by goal id.
+ * Every reading for every goal, in time order, keyed by goal id.
+ *
+ * The whole history, not just the newest — the track is the point: a player
+ * should see how many times they moved and how far each move took them. A
+ * caller that only wants the latest takes the last of each array.
  *
  * One request for the whole board — the per-goal route is still there, but
- * asking it once per goal cost a Turso round trip each.
+ * asking it once per goal cost a Turso round trip each. The server has no
+ * ?userId= filter, so one player cannot be asked for on its own.
  */
-export const latestGoalReadings = async (): Promise<Record<string, number>> => {
+export const goalReadings = async (): Promise<Record<string, Reading[]>> => {
   const res = await apiFetch("/goals/progress");
-  if (!res.ok) return {};
-  const byGoal: Record<string, { value: number }[]> = await res.json();
-  return Object.fromEntries(
-    Object.entries(byGoal)
-      .filter(([, rows]) => rows.length > 0)
-      .map(([goalId, rows]) => [goalId, rows[rows.length - 1].value])
-  );
+  return res.ok ? await res.json() : {};
 };

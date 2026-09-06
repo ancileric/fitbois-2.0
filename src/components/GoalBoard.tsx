@@ -2,7 +2,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Check, Lock, Plus, TrendingUp, Trash2 } from "lucide-react";
 import { Goal, User } from "../types";
 import { goalEligibilityError, goalProgressFraction } from "../utils/seasonEngine";
-import { apiFetch } from "../services/http";
+import { apiFetch, goalReadings, Reading } from "../services/http";
+
+// PlayerSheet reads the board's parts from here, so the fetcher and its row
+// type stay importable from this module even though they live in services.
+export type { Reading };
+export { goalReadings };
 
 /**
  * A player's goals: what they are aiming at, and how far along they are.
@@ -22,24 +27,8 @@ interface GoalBoardProps {
   onDeleteGoal: (goalId: string) => void;
 }
 
-/** One logged reading, exactly as the server stores it. */
-export interface Reading {
-  id: string;
-  value: number;
-  note: string | null;
-  recordedAt: string;
-}
-
-/**
- * Every reading for every goal, in time order, keyed by goal id.
- *
- * The whole history, not just the newest — the track below is the point: a
- * player should see how many times they moved and how far each move took them.
- */
-export const goalReadings = async (): Promise<Record<string, Reading[]>> => {
-  const res = await apiFetch("/goals/progress");
-  return res.ok ? await res.json() : {};
-};
+/** Ties the "why this goal won't take" message to the fields it is about. */
+const ELIGIBILITY_ID = "goal-eligibility";
 
 /** 47.8 stays 47.8; 48.0 reads as 48. */
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2))));
@@ -106,7 +95,7 @@ export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal,
           const hi = Math.max(from, to);
           const back = to < from;
           // 44px each where there's room. Two readings close in value would
-          // otherwise stack their hit areas and make the older one untappable,
+          // otherwise stack their hover areas and hide the older one's tooltip,
           // so a crowded step gives up width down to its neighbour's edge.
           const gap = Math.min(
             i > 0 ? Math.abs(to - steps[i - 1].to) : 100,
@@ -142,8 +131,13 @@ export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal,
                 }}
               />
 
-              <button
-                type="button"
+              {/*
+                A notch is a labelled mark, not a control — there is nothing to
+                press. role="img" keeps the reading readable to a screen reader
+                without putting a dead button in the tab order.
+              */}
+              <span
+                role="img"
                 style={{
                   left: `${to}%`,
                   zIndex: 10 + i,
@@ -154,13 +148,11 @@ export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal,
                   `${move >= 0 ? "up" : "down"} ${num(Math.abs(move))}${unit}, ${stamp(r.recordedAt)}` +
                   (r.note ? `. ${r.note}` : "")
                 }
-                className="group absolute top-0 h-11 -translate-x-1/2 grid place-items-center
-                           rounded-full cursor-default focus:outline-none
-                           focus-visible:ring-2 focus-visible:ring-clean-500"
+                className="group absolute top-0 h-11 -translate-x-1/2 grid place-items-center rounded-full"
               >
                 <span
                   className={`block rounded-full transition-transform duration-200 ease-settle
-                              group-hover:scale-125 group-focus-visible:scale-125 ${
+                              group-hover:scale-125 ${
                                 last
                                   ? `h-3.5 w-3.5 ${done ? "bg-clean-500" : "bg-ink"}`
                                   : back
@@ -173,7 +165,7 @@ export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal,
                   className={`pointer-events-none absolute bottom-full mb-1 z-20 w-max max-w-[180px]
                               rounded-lg border border-line bg-paper-card shadow-lift px-2 py-1.5
                               text-left text-[11px] leading-snug text-ink-muted
-                              opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100
+                              opacity-0 group-hover:opacity-100
                               transition-opacity duration-150 ease-settle ${tip}`}
                 >
                   <span className="block font-semibold tnum text-ink">
@@ -188,7 +180,7 @@ export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal,
                   {r.note ? <span className="block">{r.note}</span> : null}
                   <span className="block tnum">{stamp(r.recordedAt)}</span>
                 </span>
-              </button>
+              </span>
             </React.Fragment>
           );
         })}
@@ -237,6 +229,10 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
   const [readings, setReadings] = useState<Record<string, Reading[]>>({});
 
   // Every reading for each goal, so the track can show the whole journey.
+  //
+  // Mount-only. `goals` is a fresh array on every App render, so keying this on
+  // it refetched the whole board for nothing — and a new goal has no readings
+  // anyway. Logging a reading re-reads explicitly, below.
   useEffect(() => {
     let cancelled = false;
     goalReadings()
@@ -247,7 +243,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [goals]);
+  }, []);
 
   const submitReading = async (goal: Goal) => {
     const value = Number(reading);
@@ -397,7 +393,8 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                     onChange={(e) => setReading(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && submitReading(goal)}
                     placeholder={`Latest${goal.unit ? ` (${goal.unit})` : ""}`}
-                    className="flex-1 min-h-[40px] px-3 border border-line rounded-lg text-sm bg-paper-card
+                    aria-label={`Latest reading${goal.unit ? ` in ${goal.unit}` : ""} for ${goal.description}`}
+                    className="flex-1 min-h-[44px] px-3 border border-line rounded-lg text-sm bg-paper-card
                                focus:ring-2 focus:ring-clean-500"
                   />
                   <button
@@ -479,20 +476,28 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
 
       {isMine ? (
         <div className="pt-5 space-y-3">
-          <input
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="What are you going to do? (e.g. Bench 80kg for 5)"
-            className="w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
-                       focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
-          />
-          <input
-            value={draft.category}
-            onChange={(e) => setDraft({ ...draft, category: e.target.value })}
-            placeholder="Your category"
-            className="w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
-                       focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
-          />
+          <label className="block text-xs text-ink-muted">
+            The goal
+            <input
+              value={draft.description}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              placeholder="What are you going to do? (e.g. Bench 80kg for 5)"
+              aria-invalid={eligibility ? true : undefined}
+              aria-describedby={eligibility ? ELIGIBILITY_ID : undefined}
+              className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
+                         focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+            />
+          </label>
+          <label className="block text-xs text-ink-muted">
+            Category
+            <input
+              value={draft.category}
+              onChange={(e) => setDraft({ ...draft, category: e.target.value })}
+              placeholder="Your category"
+              className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card
+                         focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
+            />
+          </label>
 
           {/* Where you start and what counts as done — the two numbers a progress bar needs. */}
           <div className="grid grid-cols-[1fr_1fr_1fr] gap-2">
@@ -503,6 +508,8 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                 value={draft.from}
                 onChange={(e) => setDraft({ ...draft, from: e.target.value })}
                 placeholder="70"
+                aria-invalid={eligibility && !hasNumbers ? true : undefined}
+                aria-describedby={eligibility ? ELIGIBILITY_ID : undefined}
                 className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card tnum
                            focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
               />
@@ -514,6 +521,8 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                 value={draft.to}
                 onChange={(e) => setDraft({ ...draft, to: e.target.value })}
                 placeholder="100"
+                aria-invalid={eligibility && !hasNumbers ? true : undefined}
+                aria-describedby={eligibility ? ELIGIBILITY_ID : undefined}
                 className="mt-1 w-full min-h-[44px] px-3 border border-line rounded-xl text-sm bg-paper-card tnum
                            focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
               />
@@ -536,7 +545,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
           ) : null}
 
           {eligibility ? (
-            <p role="alert" className="text-sm text-skip-700 bg-skip-50 border border-skip-100 rounded-xl px-3 py-2">
+            <p id={ELIGIBILITY_ID} role="alert" className="text-sm text-skip-700 bg-skip-50 border border-skip-100 rounded-xl px-3 py-2">
               {eligibility}
             </p>
           ) : null}

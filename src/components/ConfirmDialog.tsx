@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -22,10 +22,35 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Escape cancels. The handler is read through a ref so an inline onCancel
+  // can't re-run the focus effect below on every render.
+  const cancelHandler = useRef(onCancel);
+  cancelHandler.current = onCancel;
+
+  // Take focus while open, hand it back to whatever opened us.
+  useEffect(() => {
+    if (!isOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && cancelHandler.current();
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-dialog-title"
+    >
       <div className="bg-paper-card rounded-xl p-6 w-full max-w-sm shadow-xl">
         <div className="flex items-start gap-4">
           {isDestructive && (
@@ -34,13 +59,16 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             </div>
           )}
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-ink">{title}</h3>
+            <h3 id="confirm-dialog-title" className="text-lg font-semibold text-ink">
+              {title}
+            </h3>
             <p className="mt-2 text-sm text-ink-muted">{message}</p>
           </div>
         </div>
 
         <div className="flex gap-3 mt-6">
           <button
+            ref={cancelRef}
             onClick={onCancel}
             className="flex-1 px-4 py-2.5 border border-line text-ink rounded-lg font-medium hover:bg-paper-sunk transition-colors"
           >
@@ -51,7 +79,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
               isDestructive
                 ? "bg-owed-500 text-paper hover:bg-owed-600"
-                : "bg-primary-500 text-paper hover:bg-primary-600"
+                : "bg-clean-500 text-paper hover:bg-clean-600"
             }`}
           >
             {confirmLabel}

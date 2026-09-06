@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Goal } from "../types";
 import { apiFetch } from "../services/http";
@@ -42,6 +42,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
   const [season, setSeason] = useState<Season | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [progress, setProgress] = useState<Record<string, Reading[]>>({});
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
     const [seasonRes, goalsRes] = await Promise.all([
@@ -67,6 +68,18 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Focus goes back to the row that opened us. Mount-only: an inline onClose
+  // would otherwise re-run this on every render and bounce focus out.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    return () => opener?.focus?.();
+  }, []);
+
+  // The close button only exists once the skeleton is replaced.
+  useEffect(() => {
+    if (season) closeRef.current?.focus();
+  }, [season]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/50 backdrop-blur-sm"
@@ -91,6 +104,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
                 </p>
               </div>
               <button
+                ref={closeRef}
                 onClick={onClose}
                 aria-label="Close"
                 className="min-w-[44px] min-h-[44px] grid place-items-center rounded-xl text-ink-muted

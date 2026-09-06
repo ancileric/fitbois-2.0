@@ -163,18 +163,16 @@ function AppContent() {
         apiService.getAllGoals(),
       ]);
 
-      const recalculated = dbUsers;
-
-      setUsers(recalculated);
+      setUsers(dbUsers);
       setWorkoutDays(dbWorkouts);
       setGoals(dbGoals);
       setCurrentUser((prev) => {
         const remembered = prev?.id ?? localStorage.getItem("playerId");
-        return recalculated.find((u) => u.id === remembered) ?? recalculated[0] ?? null;
+        return dbUsers.find((u) => u.id === remembered) ?? dbUsers[0] ?? null;
       });
 
       writeSnapshot({
-        users: recalculated,
+        users: dbUsers,
         workoutDays: dbWorkouts,
         goals: dbGoals,
       });
@@ -404,19 +402,19 @@ function AppContent() {
 
   if (loadFailed && !currentUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-paper flex items-center justify-center p-4">
         <div className="text-center max-w-sm">
-          <h1 className="text-xl font-semibold text-gray-900 mb-2">
+          <h1 className="text-xl font-semibold text-ink mb-2">
             Can't reach FitBros
           </h1>
-          <p className="text-gray-600 mb-6">
+          <p className="text-ink-muted mb-6">
             We couldn't load your data and no offline copy is available on this
             device. Check your connection and try again.
           </p>
           <button
             onClick={manualRetry}
             disabled={isRetrying}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium disabled:opacity-50"
+            className="px-4 py-2 bg-clean-600 text-paper rounded-lg font-medium disabled:opacity-50"
           >
             {isRetrying ? "Retrying…" : "Retry"}
           </button>
@@ -490,7 +488,7 @@ function AppContent() {
               />
             )}
 
-            {activeView === "group" && <GroupBoard currentUser={currentUser} />}
+            {activeView === "group" && <GroupBoard currentUser={currentUser} goals={goals} />}
 
             {activeView === "rules" && <Rules />}
 
@@ -501,7 +499,6 @@ function AppContent() {
                 adminSettings={adminSettings}
                 onUpdateUser={updateUser}
                 onDeleteUser={deleteUser}
-                onUpdateWorkoutDay={updateWorkoutDay}
                 onRecalculateConsistency={recalculateUserConsistency}
                 onSettingsChange={(settings) =>
                   setAdminSettings((prev) => ({ ...prev, ...settings }))

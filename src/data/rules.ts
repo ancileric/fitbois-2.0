@@ -1,7 +1,7 @@
 /**
  * The FitBros 3.0 rules, as the group agreed them.
  *
- * Lifted from the shared rulebook circulated before Week 0, so the app and the
+ * Lifted from the shared rulebook the group agreed on, so the app and the
  * document cannot drift into saying different things. If a rule changes, it
  * changes in both places together.
  *
@@ -78,11 +78,10 @@ export const ALL_RULES: Rule[] = [
     number: "04",
     title: "Winning",
     stage: "How it ends",
-    summary: "Everyone with nothing owing splits the pot. Most goals wins the title.",
+    summary: "Everyone with nothing owing splits the pot.",
     paragraphs: [],
     points: [
       "The prize pot splits between everyone who ends the season with nothing left owing. A fined week doesn't cost you a share; it only costs you the fine.",
-      "Challenge winner — most goals completed at target. Tiebreak: fewest fined weeks.",
     ],
     table: [],
     ties: ["r7"],

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Goal } from "../types";
-import { apiFetch, latestGoalReadings } from "../services/http";
+import { goalReadings } from "../services/http";
 
 /**
  * The season in numbers, at group scale.
@@ -40,39 +40,62 @@ const ordinal = (n: number) => {
   return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 };
 
-/** How far a goal has come, on the numbers rather than on a tick. */
-const goalFraction = (goal: Goal, reading?: number): number => {
+/**
+ * How far a goal has come, on the numbers rather than on a tick.
+ *
+ * `null` means the goal carries no numbers, so there is nothing to measure —
+ * different from 0, which is a goal with numbers that has not moved. Averaging
+ * the unmeasurable in as zero dragged whole players down for goals that were
+ * never scoreable in the first place.
+ */
+export const goalFraction = (goal: Goal, reading?: number): number | null => {
   if (goal.isCompleted) return 1;
-  if (goal.baselineValue == null || goal.targetValue == null || reading == null) return 0;
+  if (goal.baselineValue == null || goal.targetValue == null) return null;
+  if (reading == null) return 0;
   if (goal.targetValue === goal.baselineValue) return reading >= goal.targetValue ? 1 : 0;
   return Math.max(0, Math.min(1, (reading - goal.baselineValue) / (goal.targetValue - goal.baselineValue)));
 };
 
 const SECTION_HEAD = "text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted";
 
-const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ rows, currentUserId }) => {
+const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string; goals: Goal[] }> = ({
+  rows,
+  currentUserId,
+  goals,
+}) => {
   const [goalPct, setGoalPct] = useState<Record<string, number> | null>(null);
   const [hoverWeek, setHoverWeek] = useState<number | null>(null);
 
+  // The goals come from App, which already holds them. Only the readings are
+  // ours to fetch.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [goalRes, readings] = await Promise.all([apiFetch("/goals"), latestGoalReadings()]);
-      if (!goalRes.ok || cancelled) return;
-      const goals: Goal[] = await goalRes.json();
+      const readings = await goalReadings();
+      if (cancelled) return;
+      const latest = (goalId: string): number | undefined => {
+        const rows = readings[goalId];
+        return rows?.length ? rows[rows.length - 1].value : undefined;
+      };
 
-      // Every goal counts the same — they carry no weight, so this is a plain
-      // average of how far each one has come.
+      // Every measurable goal counts the same — they carry no weight, so this
+      // is a plain average of how far each one has come. A goal with no numbers
+      // is skipped, not counted as nothing; a player with none at all gets no
+      // entry here and reads as a dash.
       const byUser: Record<string, { done: number; count: number }> = {};
       goals.forEach((goal) => {
+        const fraction = goalFraction(goal, latest(goal.id));
+        if (fraction === null) return;
         const bucket = (byUser[goal.userId] ??= { done: 0, count: 0 });
         bucket.count += 1;
-        bucket.done += goalFraction(goal, readings[goal.id]);
+        bucket.done += fraction;
       });
       if (!cancelled) {
         setGoalPct(
           Object.fromEntries(
-            Object.entries(byUser).map(([id, b]) => [id, b.count ? b.done / b.count : 0])
+            Object.entries(byUser)
+              .filter(([, b]) => b.count > 0)
+              .map(([id, b]) => [id, b.done / b.count])
           )
         );
       }
@@ -80,7 +103,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [goals]);
 
   /** One row per week, counted across everybody who played it, with the running bill. */
   const weeks = useMemo(() => {
@@ -126,7 +149,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
     null
   );
 
-  const ranked = [...rows].sort((a, b) => (goalPct?.[b.userId] ?? 0) - (goalPct?.[a.userId] ?? 0));
+  const ranked = [...rows].sort((a, b) => (goalPct?.[b.userId] ?? -1) - (goalPct?.[a.userId] ?? -1));
 
   /** 24 week labels do not fit a phone, so only the landmarks are printed. */
   const labelled = (week: number, i: number) =>
@@ -349,7 +372,8 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
       <div>
         <h4 className={SECTION_HEAD}>Goal progress</h4>
         <p className="text-sm text-ink-muted mt-0.5">
-          How far each player's goals have come, averaged across all of them.
+          How far each player's goals have come, averaged across the ones with
+          numbers. A dash means nothing to measure yet.
         </p>
 
         {goalPct === null ? (
@@ -357,7 +381,8 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
         ) : (
           <ul className="mt-3 space-y-2.5">
             {ranked.map((r) => {
-              const pct = goalPct[r.userId] ?? 0;
+              // Undefined, not zero: this player has no goal anyone can measure.
+              const pct = goalPct[r.userId];
               const isMe = r.userId === currentUserId;
               return (
                 <li key={r.userId} className="flex items-center gap-3">
@@ -369,18 +394,25 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
                   <span
                     className="flex-1 h-2.5 rounded-full bg-paper-sunk overflow-hidden"
                     role="img"
-                    aria-label={`${r.name}: goals ${Math.round(pct * 100)} percent of the way there`}
+                    aria-label={
+                      pct === undefined
+                        ? `${r.name}: no goals with numbers to measure`
+                        : `${r.name}: goals ${Math.round(pct * 100)} percent of the way there`
+                    }
                   >
                     <span
                       className="block h-full rounded-full"
                       style={{
-                        width: `${Math.max(pct * 100, pct > 0 ? 2 : 0)}%`,
+                        width: `${pct ? Math.max(pct * 100, 2) : 0}%`,
                         background: isMe ? "rgb(var(--chart-clean))" : "rgb(var(--ink-faint))",
                       }}
                     />
                   </span>
-                  <span className="text-sm tnum text-ink-muted w-12 text-right">
-                    {Math.round(pct * 100)}%
+                  <span
+                    className="text-sm tnum text-ink-muted w-12 text-right"
+                    title={pct === undefined ? "No goals with a start and a target" : undefined}
+                  >
+                    {pct === undefined ? "—" : `${Math.round(pct * 100)}%`}
                   </span>
                 </li>
               );

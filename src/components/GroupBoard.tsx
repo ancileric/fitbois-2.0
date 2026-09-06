@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Share2, Trophy } from "lucide-react";
-import { User } from "../types";
+import { Goal, User } from "../types";
 import Feed from "./Feed";
 import PlayerSheet from "./PlayerSheet";
 import GroupStats from "./GroupStats";
@@ -35,6 +35,8 @@ interface GroupRow {
 
 interface GroupBoardProps {
   currentUser: User | null;
+  /** App already holds every goal; the statistics block should not fetch them again. */
+  goals: Goal[];
 }
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
@@ -47,7 +49,7 @@ const OUTCOME_STYLE = {
   missed: "bg-owed-500",
 } as const;
 
-const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
+const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser, goals }) => {
   const [rows, setRows] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -305,7 +307,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
       {openPlayer ? <PlayerSheet userId={openPlayer} onClose={() => setOpenPlayer(null)} /> : null}
 
       <section className="pt-4 border-t border-line">
-        <GroupStats rows={rows} currentUserId={currentUser?.id} />
+        <GroupStats rows={rows} currentUserId={currentUser?.id} goals={goals} />
       </section>
 
       <section className="pt-2">

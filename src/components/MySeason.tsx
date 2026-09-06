@@ -9,7 +9,12 @@ import {
 } from "lucide-react";
 import { User, WorkoutDay, WorkoutKind } from "../types";
 import { apiFetch } from "../services/http";
-import { CREDIT_BY_KIND, SEASON_WEEKS, WEEK_ENDS_ON } from "../utils/seasonEngine";
+import {
+  CREDIT_BY_KIND,
+  SEASON_WEEKS,
+  WEEK_ENDS_ON,
+  WEEKS_TO_MOVE,
+} from "../utils/seasonEngine";
 
 /**
  * The home screen, written for one person: your week first, your money second,
@@ -71,7 +76,7 @@ const OUTCOME_STYLE = {
 const OUTCOME_LABEL = { clean: "Clean", missed: "Fined" } as const;
 
 /** The season so far, plus the week still running, as one strip. */
-const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, compact }) => (
+const WeekStrip: React.FC<{ view: SeasonView }> = ({ view }) => (
   <div className="flex gap-1" role="list" aria-label={`${view.name}'s weeks`}>
     {view.weeks.map((w) => (
       <div
@@ -80,16 +85,14 @@ const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, co
         title={`Week ${w.week}: ${credit(w.credits)} workouts — ${OUTCOME_LABEL[w.outcome]}${
           w.fine ? ` (${rupees(w.fine)})` : ""
         }`}
-        className={`flex-1 rounded-md ${compact ? "h-2.5" : "h-8"} ${OUTCOME_STYLE[w.outcome]}`}
+        className={`flex-1 rounded-md h-8 ${OUTCOME_STYLE[w.outcome]}`}
       />
     ))}
     {/* The current week is still open, so it reads as an outline, not a verdict. */}
     <div
       role="listitem"
       title={`Week ${view.currentWeekProgress.week}: ${credit(view.currentWeekProgress.credits)} of ${view.currentWeekProgress.needed} so far — still running`}
-      className={`flex-1 rounded-md border-2 border-dashed border-ink-faint relative overflow-hidden ${
-        compact ? "h-2.5" : "h-8"
-      }`}
+      className="flex-1 rounded-md border-2 border-dashed border-ink-faint relative overflow-hidden h-8"
     >
       <div
         className="absolute inset-x-0 bottom-0 bg-clean-500/40"
@@ -124,7 +127,10 @@ const nudgeFor = (
 
   const left = needed - done;
   if (left <= 0) {
-    return { tone: "clean", text: "This week is clean. Three in a row and the price of a miss drops." };
+    return {
+      tone: "clean",
+      text: `This week is clean. ${WEEKS_TO_MOVE} in a row and the price of a miss halves.`,
+    };
   }
   if (left > daysLeft) {
     return {
@@ -235,9 +241,9 @@ const MySeason: React.FC<MySeasonProps> = ({
   if (error) {
     return (
       <div className="bg-owed-50 border border-owed-100 rounded-2xl p-5 text-owed-700">
-        <p className="font-semibold mb-1">{error}</p>
+        <p className="font-semibold mb-1">Couldn't load your season</p>
         <p className="text-sm text-ink-muted">
-          Start the API with <code className="font-mono">PORT=5000 node backend/server.js</code>, then retry.
+          Something went wrong reaching the season. Try again in a moment.
         </p>
         <button onClick={load} className="mt-4 min-h-[44px] px-4 bg-owed-500 text-paper rounded-xl text-sm font-semibold">
           Retry
@@ -432,7 +438,7 @@ const MySeason: React.FC<MySeasonProps> = ({
                   <button
                     onClick={() => call(`/fines/${f.id}/settle`)}
                     disabled={busy}
-                    className="min-h-[40px] px-4 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer
+                    className="min-h-[44px] px-4 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer
                                disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     Mark paid

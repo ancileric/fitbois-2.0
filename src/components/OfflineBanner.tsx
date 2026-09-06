@@ -32,8 +32,8 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
   // is still in flight. No retry button; this state is transient.
   if (mode === 'hydrating') {
     return (
-      <div className="sticky top-0 z-50 bg-blue-50 border-b border-blue-200">
-        <div className="container mx-auto px-4 py-2 flex items-center gap-2 text-sm text-blue-900">
+      <div className="sticky top-0 z-50 bg-paper-sunk border-b border-line">
+        <div className="container mx-auto px-4 py-2 flex items-center gap-2 text-sm text-ink-muted">
           <RefreshCw className="w-4 h-4 flex-shrink-0 animate-spin" />
           <span>Refreshing latest data…</span>
         </div>
@@ -44,7 +44,7 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
   return (
     <div className="sticky top-0 z-50 bg-skip-50 border-b border-skip-100">
       <div className="container mx-auto px-4 py-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm text-amber-900">
+        <div className="flex items-center gap-2 text-sm text-skip-700">
           <WifiOff className="w-4 h-4 flex-shrink-0" />
           <span>
             Showing data from {formatAgo(savedAt)} — reconnecting…
@@ -53,7 +53,7 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
         <button
           onClick={onRetry}
           disabled={isRetrying}
-          className="flex items-center gap-1.5 text-xs font-medium text-amber-900 hover:text-skip-600 disabled:opacity-50 px-2 py-1 rounded border border-amber-300 bg-paper-card hover:bg-skip-50"
+          className="flex items-center gap-1.5 text-xs font-medium text-skip-700 hover:text-skip-600 disabled:opacity-50 px-2 py-1 rounded border border-skip-100 bg-paper-card hover:bg-skip-50"
         >
           <RefreshCw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
           {isRetrying ? 'Retrying…' : 'Retry now'}
