@@ -5,8 +5,8 @@
  * document cannot drift into saying different things. If a rule changes, it
  * changes in both places together.
  *
- * `ties` records which other rules a rule leans on — Rule 06 (fines) is only
- * legible next to Rule 05 (logging), and the app should let people follow that.
+ * `ties` records which other rules a rule leans on — Rule 05 (fines) is only
+ * legible next to Rule 04 (logging), and the app should let people follow that.
  */
 
 export interface Rule {
@@ -36,37 +36,22 @@ export const ALL_RULES: Rule[] = [
     summary: "Physical, numbered, provable. Nothing you eat or sleep.",
     paragraphs: [
       "Your own categories, no fixed slots. Every goal is physical output, measured by a number — reps, kg, minutes, sessions, distance, time — and provable by an app log, a timestamp or a photo.",
+      "Goals carry no weight and cost nothing. Set as many or as few as keep you moving — they are yours to chase, and only you decide what is worth chasing.",
       "Bodyweight isn't a goal. It's a state, not an output. Train right and it follows.",
     ],
     points: [],
     table: [],
-    ties: ["r2", "r3", "r4"],
-    hasDefault: false,
-  },
-  {
-    id: "r2",
-    number: "02",
-    title: "Points",
-    stage: "Before you start",
-    summary: "6 points each, split across 2 to 6 goals.",
-    paragraphs: ["Spend all 6. Nobody runs an easier season than anyone else."],
-    points: [],
-    table: [
-      ["Heavy", "3"],
-      ["Medium", "2"],
-      ["Light", "1"],
-    ],
-    ties: ["r1", "r3", "r4", "r11"],
+    ties: ["r3", "r4"],
     hasDefault: false,
   },
   {
     id: "r3",
-    number: "03",
+    number: "02",
     title: "Week 0",
     stage: "Before you start",
     summary: "Goals approved, baselines recorded, clocks locked.",
     paragraphs: [
-      "Everyone posts goals with point values and the group signs off. A goal is live once approved.",
+      "Everyone posts their goals and the group signs off. A goal is live once approved.",
     ],
     points: [
       "Baselines — video of the lift, current time, current max",
@@ -74,12 +59,12 @@ export const ALL_RULES: Rule[] = [
       "Week-end day, fixed for the season",
     ],
     table: [],
-    ties: ["r1", "r2", "r5", "r12"],
+    ties: ["r1", "r5", "r12"],
     hasDefault: false,
   },
   {
     id: "r4",
-    number: "04",
+    number: "03",
     title: "Changing a goal",
     stage: "Before you start",
     summary: "Only once you've completed it. Group votes.",
@@ -87,16 +72,15 @@ export const ALL_RULES: Rule[] = [
     points: [
       "Petition the group, set a meeting time",
       "Only people who attend get a vote",
-      "Replacement worth the same points or more",
       "Tied vote → the original goal stands",
     ],
     table: [],
-    ties: ["r1", "r2"],
+    ties: ["r1"],
     hasDefault: true,
   },
   {
     id: "r5",
-    number: "05",
+    number: "04",
     title: "Logging",
     stage: "Week to week",
     summary: "One shared sheet. A session is a workout, 10k steps is half.",
@@ -115,7 +99,7 @@ export const ALL_RULES: Rule[] = [
   },
   {
     id: "r7",
-    number: "06",
+    number: "05",
     title: "Fines",
     stage: "When you miss",
     summary: "₹200 to start. Two misses at a price, then it doubles.",
@@ -135,22 +119,8 @@ export const ALL_RULES: Rule[] = [
     hasDefault: false,
   },
   {
-    id: "r10",
-    number: "07",
-    title: "Injury",
-    stage: "When you miss",
-    summary: "Solid proof → full refund and exit.",
-    paragraphs: [
-      "Verified injury with solid proof: full refund, exit from the season, paid out of the prize pot. No proof, no claim.",
-    ],
-    points: [],
-    table: [],
-    ties: ["r11"],
-    hasDefault: false,
-  },
-  {
     id: "r11",
-    number: "08",
+    number: "06",
     title: "Winning",
     stage: "How it ends",
     summary: "Everyone with nothing owing splits the pot. Most goals wins the title.",
@@ -160,12 +130,12 @@ export const ALL_RULES: Rule[] = [
       "Challenge winner — most goals completed at target. Tiebreak: fewest fined weeks.",
     ],
     table: [],
-    ties: ["r7", "r10", "r2"],
+    ties: ["r7"],
     hasDefault: false,
   },
   {
     id: "r12",
-    number: "09",
+    number: "07",
     title: "Admin",
     stage: "How it ends",
     summary: "Scorekeeper and Treasurer. Two people, both unassigned.",

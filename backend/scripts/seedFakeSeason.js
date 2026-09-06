@@ -36,7 +36,7 @@ const WALKED = [3, 4];
  * weeks   — workouts logged per week
  * pays    — "all" settles every fine, "none" settles nothing,
  *           or an array of the weeks whose fines get settled
- * goals   — [points, description, category, completed?, approved?, baseline, target, unit]
+ * goals   — [description, category, completed?, approved?, baseline, target, unit]
  */
 const PLAYERS = [
   {
@@ -47,8 +47,8 @@ const PLAYERS = [
     weeks: Array(10).fill(CLEAN),
     pays: "all",
     goals: [
-      [3, "Deadlift 100kg", "strength", true, true, 70, 100, "kg"],
-      [3, "Half marathon under 2h", "endurance", false, true, 150, 120, "min"],
+      ["Deadlift 100kg", "strength", true, true, 70, 100, "kg"],
+      ["Half marathon under 2h", "endurance", false, true, 150, 120, "min"],
     ],
   },
   {
@@ -59,9 +59,9 @@ const PLAYERS = [
     weeks: [...Array(9).fill(CLEAN), MISS],
     pays: "none",
     goals: [
-      [2, "Bench 80kg for 5", "strength", false, true, 60, 80, "kg"],
-      [2, "Swim 1km non-stop", "cardio", false, true, 300, 1000, "m"],
-      [2, "Play squash 15 times", "sports", false, true, 0, 15, "games"],
+      ["Bench 80kg for 5", "strength", false, true, 60, 80, "kg"],
+      ["Swim 1km non-stop", "cardio", false, true, 300, 1000, "m"],
+      ["Play squash 15 times", "sports", false, true, 0, 15, "games"],
     ],
   },
   {
@@ -72,12 +72,12 @@ const PLAYERS = [
     weeks: [CLEAN, CLEAN, MISS, ...Array(7).fill(CLEAN)],
     pays: "none",
     goals: [
-      [1, "Run 5k every week", "cardio", true, true, 0, 10, "runs"],
-      [1, "20 pull-ups in a set", "strength", true, true, 8, 20, "reps"],
-      [1, "Cycle 200km total", "endurance", false, true, 0, 200, "km"],
-      [1, "Yoga 30 sessions", "mobility", false, true],
-      [1, "Plank 3 minutes", "core", false, true],
-      [1, "Climb 20 routes", "sports", false, true],
+      ["Run 5k every week", "cardio", true, true, 0, 10, "runs"],
+      ["20 pull-ups in a set", "strength", true, true, 8, 20, "reps"],
+      ["Cycle 200km total", "endurance", false, true, 0, 200, "km"],
+      ["Yoga 30 sessions", "mobility", false, true],
+      ["Plank 3 minutes", "core", false, true],
+      ["Climb 20 routes", "sports", false, true],
     ],
   },
   {
@@ -88,9 +88,9 @@ const PLAYERS = [
     weeks: [...Array(7).fill(CLEAN), MISS, MISS, MISS],
     pays: "all",
     goals: [
-      [3, "Squat bodyweight x10", "strength", true, true, 4, 10, "reps"],
-      [2, "Sub-25 minute 5k", "cardio", true, true, 31, 25, "min"],
-      [1, "Box 12 sessions", "sports", true, true],
+      ["Squat bodyweight x10", "strength", true, true, 4, 10, "reps"],
+      ["Sub-25 minute 5k", "cardio", true, true, 31, 25, "min"],
+      ["Box 12 sessions", "sports", true, true],
     ],
   },
   {
@@ -101,10 +101,10 @@ const PLAYERS = [
     weeks: [MISS, MISS, MISS, MISS, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN],
     pays: "all",
     goals: [
-      [3, "Muscle-up unassisted", "strength", false, true, 0, 1, "reps"],
-      [1, "Walk 10k steps daily", "consistency", false, true],
-      [1, "Stretch every morning", "mobility", false, true],
-      [1, "Badminton 20 games", "sports", false, true],
+      ["Muscle-up unassisted", "strength", false, true, 0, 1, "reps"],
+      ["Walk 10k steps daily", "consistency", false, true],
+      ["Stretch every morning", "mobility", false, true],
+      ["Badminton 20 games", "sports", false, true],
     ],
   },
   {
@@ -115,10 +115,10 @@ const PLAYERS = [
     weeks: [MISS, MISS, MISS, CLEAN, CLEAN, WALKED, CLEAN, WALKED, CLEAN, CLEAN],
     pays: "all",
     goals: [
-      [2, "Row 2km under 8 minutes", "cardio", true, true, 9.5, 8, "min"],
-      [2, "Overhead press 50kg", "strength", false, true, 35, 50, "kg"],
-      [1, "Football 25 games", "sports", false, true],
-      [1, "Sleep-free rest days logged", "consistency", false, true],
+      ["Row 2km under 8 minutes", "cardio", true, true, 9.5, 8, "min"],
+      ["Overhead press 50kg", "strength", false, true, 35, 50, "kg"],
+      ["Football 25 games", "sports", false, true],
+      ["Sleep-free rest days logged", "consistency", false, true],
     ],
   },
   {
@@ -129,11 +129,11 @@ const PLAYERS = [
     weeks: [MISS, CLEAN, MISS, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN],
     pays: "none",
     goals: [
-      [2, "Cycle to work 40 times", "consistency", false, true],
-      [1, "Hike 5 trails", "endurance", false, true],
-      [1, "Push-ups 100 in a day", "strength", false, true],
-      [1, "Table tennis 15 games", "sports", false, true],
-      [1, "Cold plunge 20 times", "recovery", false, true],
+      ["Cycle to work 40 times", "consistency", false, true],
+      ["Hike 5 trails", "endurance", false, true],
+      ["Push-ups 100 in a day", "strength", false, true],
+      ["Table tennis 15 games", "sports", false, true],
+      ["Cold plunge 20 times", "recovery", false, true],
     ],
   },
   {
@@ -144,8 +144,8 @@ const PLAYERS = [
     weeks: [CLEAN, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN, CLEAN, CLEAN, CLEAN],
     pays: "all",
     goals: [
-      [3, "Lead climb 6b", "sports", false, true, 0, 6, "grade"],
-      [1, "Hangboard 3x a week", "strength", false, true],
+      ["Lead climb 6b", "sports", false, true, 0, 6, "grade"],
+      ["Hangboard 3x a week", "strength", false, true],
     ],
   },
   {
@@ -156,8 +156,8 @@ const PLAYERS = [
     weeks: [CLEAN, MISS, WALKED, MISS, CLEAN, WALKED, CLEAN, CLEAN, CLEAN, MISS],
     pays: [4],
     goals: [
-      [3, "Swim 100 lengths", "endurance", false, false, 20, 100, "lengths"],
-      [3, "Bench bodyweight", "strength", false, false],
+      ["Swim 100 lengths", "endurance", false, false, 20, 100, "lengths"],
+      ["Bench bodyweight", "strength", false, false],
     ],
   },
 ];
@@ -258,18 +258,17 @@ async function seed() {
     );
 
     for (const goal of player.goals) {
-      const [points, description, category, completed, approved, baselineValue, targetValue, unit] = goal;
+      const [description, category, completed, approved, baselineValue, targetValue, unit] = goal;
       const goalId = uuidv4();
       await db.run(
-        `INSERT INTO goals (id, user_id, category, description, points, baseline, target,
+        `INSERT INTO goals (id, user_id, category, description, baseline, target,
           baseline_value, target_value, unit, approved_at, is_completed, completed_date, created_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           goalId,
           player.id,
           category,
           description,
-          points,
           baselineValue != null ? `${baselineValue}${unit ? ` ${unit}` : ""}` : null,
           targetValue != null ? `${targetValue}${unit ? ` ${unit}` : ""}` : null,
           baselineValue ?? null,
@@ -287,7 +286,7 @@ async function seed() {
         // Vary per goal, or every player looks identically far along.
         const spread = [
           [0.2, 0.45], [0.35, 0.7], [0.1, 0.3], [0.5, 0.85], [0.15, 0.6], [0.4, 0.62],
-        ][(description.length + points) % 6];
+        ][description.length % 6];
         const steps = completed ? [0.6, 1] : spread;
         steps.forEach((fraction, i) => {
           // Reps, games and lengths are counted, not measured — no half a pull-up.
@@ -306,7 +305,6 @@ async function seed() {
       }
     }
 
-    const spent = player.goals.reduce((sum, g) => sum + g[0], 0);
     summary.push({
       name: player.name,
       note: player.note,
@@ -315,7 +313,7 @@ async function seed() {
       paid: state.paid,
       outstanding: state.outstanding,
       pot: state.potEligible ? "IN" : "OUT",
-      goals: `${player.goals.map((g) => g[0]).join("+")} = ${spent}${spent === 6 ? "" : " (incomplete)"}`,
+      goals: `${player.goals.length}`,
     });
   }
 
@@ -328,14 +326,14 @@ async function seed() {
 
   console.log(`\n✅ Seeded ${PLAYERS.length} players across ${WEEKS_PLAYED} completed weeks\n`);
   console.log(
-    "name      price   billed   paid   owed   pot   goals              scenario"
+    "name      price   billed   paid   owed   pot   goals  scenario"
   );
   for (const s of summary) {
     console.log(
       `${s.name.padEnd(9)} ₹${String(s.price).padEnd(6)} ₹${String(s.billed).padEnd(7)} ₹${String(
         s.paid
       ).padEnd(5)} ₹${String(s.outstanding).padEnd(5)} ${s.pot.padEnd(5)} ${s.goals.padEnd(
-        18
+        6
       )} ${s.note}`
     );
   }

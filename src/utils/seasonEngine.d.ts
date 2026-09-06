@@ -68,7 +68,6 @@ export const WEEKS_TO_MOVE: 2;
 export function runSeason(input: SeasonInput): SeasonState;
 export function currentFine(state: SeasonState): number;
 export function unpaidFines(state: SeasonState, settledWeeks?: number[]): WeekResult[];
-export function goalSplitError(points: number[]): string | null;
 /** Rule 01: physical output, measured by a number, provable. Null when eligible. */
 export function goalEligibilityError(description: string, target?: string): string | null;
 /**

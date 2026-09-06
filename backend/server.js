@@ -861,7 +861,6 @@ app.get("/api/goals", async (req, res) => {
       userName: row.user_name,
       category: row.category,
       description: row.description,
-      points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
@@ -896,7 +895,6 @@ app.get("/api/goals/user/:userId", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
@@ -1035,8 +1033,7 @@ app.get("/api/goals/petitions", async (req, res) => {
  *
  * Raising it is the whole record kept here — who asked, against which goal,
  * when. The vote itself happens in the room: only people who attend get one,
- * the replacement must be worth the same points or more, and a tie keeps the
- * original.
+ * and a tie keeps the original.
  *
  * ponytail: no ballot table. Add one when the group actually votes in the app
  * rather than in person.
@@ -1098,7 +1095,6 @@ app.get("/api/goals/:id", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
@@ -1119,9 +1115,9 @@ app.get("/api/goals/:id", async (req, res) => {
 });
 
 app.post("/api/goals", async (req, res) => {
-  const { userId, category, description, points, baseline, target, baselineValue, targetValue, unit } = req.body;
+  const { userId, category, description, baseline, target, baselineValue, targetValue, unit } = req.body;
 
-  debug("Goal creation request:", { userId, category, description, points });
+  debug("Goal creation request:", { userId, category, description });
 
   if (!userId) {
     res.status(400).json({ error: "User ID is required" });
@@ -1174,42 +1170,21 @@ app.post("/api/goals", async (req, res) => {
       return;
     }
 
-    // Rule 02: 6 points across 2-6 goals. Reject anything that can't reach a legal split.
-    const existingGoals = await db.all("SELECT points FROM goals WHERE user_id = ?", [userId]);
-    const spent = existingGoals.reduce((sum, g) => sum + Number(g.points), 0);
-    const wanted = Number(points) || 1;
-
-    if (wanted < 1 || wanted > 3) {
-      res.status(400).json({ error: "A goal is worth 1, 2 or 3 points" });
-      return;
-    }
-    if (spent + wanted > 6) {
-      res.status(400).json({
-        error: `That would spend ${spent + wanted} of 6 points. ${6 - spent} left.`,
-      });
-      return;
-    }
-    if (existingGoals.length >= 6) {
-      res.status(400).json({ error: "At most 6 goals" });
-      return;
-    }
-
     const id = uuidv4();
     const createdDate = new Date().toISOString().split("T")[0];
     const sanitizedDescription = sanitizeString(description);
 
     await db.run(
       `INSERT INTO goals (
-        id, user_id, category, description, points, baseline, target,
+        id, user_id, category, description, baseline, target,
         baseline_value, target_value, unit,
         is_completed, completed_date, created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         userId,
         category,
         sanitizedDescription,
-        wanted,
         baseline || null,
         target || null,
         Number.isFinite(Number(baselineValue)) ? Number(baselineValue) : null,
@@ -1228,7 +1203,6 @@ app.post("/api/goals", async (req, res) => {
       userId,
       category,
       description: sanitizedDescription,
-      points: wanted,
       baseline: baseline || null,
       target: target || null,
       baselineValue: baseNum,
@@ -1252,7 +1226,7 @@ app.post("/api/goals", async (req, res) => {
 });
 
 app.put("/api/goals/:id", async (req, res) => {
-  const { description, points, baseline, target, isCompleted } = req.body;
+  const { description, baseline, target, isCompleted } = req.body;
 
   const descriptionError = validateString(description, "Description", 3, 500);
   if (descriptionError) {
@@ -1295,26 +1269,6 @@ app.put("/api/goals/:id", async (req, res) => {
       return;
     }
 
-    // Changing a goal's points must still leave the player on a legal 6-point split.
-    if (points !== undefined) {
-      const currentGoal = await db.get("SELECT user_id, points FROM goals WHERE id = ?", [req.params.id]);
-      if (currentGoal) {
-        const others = await db.all(
-          "SELECT points FROM goals WHERE user_id = ? AND id != ?",
-          [currentGoal.user_id, req.params.id]
-        );
-        const spent = others.reduce((sum, g) => sum + Number(g.points), 0) + Number(points);
-        if (Number(points) < 1 || Number(points) > 3) {
-          res.status(400).json({ error: "A goal is worth 1, 2 or 3 points" });
-          return;
-        }
-        if (spent > 6) {
-          res.status(400).json({ error: `That would spend ${spent} of 6 points` });
-          return;
-        }
-      }
-    }
-
     const sanitizedDescription = sanitizeString(description);
 
     // null here means "leave completion alone". A measured goal always does —
@@ -1328,7 +1282,6 @@ app.put("/api/goals/:id", async (req, res) => {
     const result = await db.run(
       `UPDATE goals SET
         description = ?,
-        points = COALESCE(?, points),
         baseline = COALESCE(?, baseline),
         target = COALESCE(?, target),
         is_completed = COALESCE(?, is_completed),
@@ -1337,7 +1290,6 @@ app.put("/api/goals/:id", async (req, res) => {
       WHERE id = ?`,
       [
         sanitizedDescription,
-        points ?? null,
         baseline ?? null,
         target ?? null,
         nextCompleted,
@@ -1363,7 +1315,6 @@ app.put("/api/goals/:id", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      points: Number(row.points),
       baseline: row.baseline,
       target: row.target,
       baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
@@ -1415,7 +1366,6 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
       `SELECT
         COUNT(*) as total_goals,
         SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_goals,
-        SUM(points) as points_spent,
         COUNT(DISTINCT category) as categories_covered
       FROM goals
       WHERE user_id = ?`,
@@ -1425,7 +1375,6 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
     const stats = {
       totalGoals: row.total_goals || 0,
       completedGoals: row.completed_goals || 0,
-      pointsSpent: row.points_spent || 0,
       categoriesCovered: row.categories_covered || 0,
       completionRate:
         row.total_goals > 0
@@ -1682,7 +1631,7 @@ app.get("/api/feed", async (req, res) => {
     const [users, fines, goals, progress] = await Promise.all([
       db.all("SELECT id, name, avatar FROM users"),
       db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines WHERE voided_at IS NULL"),
-      db.all("SELECT id, user_id, description, points, completed_date FROM goals WHERE is_completed = 1"),
+      db.all("SELECT id, user_id, description, completed_date FROM goals WHERE is_completed = 1"),
       db.all(
         `SELECT p.user_id, p.value, p.recorded_at, g.description, g.unit, g.baseline_value, g.target_value
          FROM goal_progress p JOIN goals g ON g.id = p.goal_id
@@ -1720,7 +1669,7 @@ app.get("/api/feed", async (req, res) => {
         userId: g.user_id,
         name: nameOf.get(g.user_id),
         at: g.completed_date ? `${g.completed_date}T12:00:00.000Z` : null,
-        text: `completed "${g.description}" (${g.points} pt${g.points > 1 ? "s" : ""})`,
+        text: `completed "${g.description}"`,
       });
     }
 

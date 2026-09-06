@@ -24,7 +24,7 @@ const DDL = `
     user_id TEXT NOT NULL,
     category TEXT NOT NULL,
     description TEXT NOT NULL,
-    points INTEGER NOT NULL DEFAULT 1,
+    points INTEGER NOT NULL DEFAULT 1, -- vestigial: goals are not scored; kept so existing databases are untouched
     baseline TEXT,
     target TEXT,
     baseline_value REAL,

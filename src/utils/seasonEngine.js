@@ -189,19 +189,6 @@ const goalEligibilityError = (description, target) => {
 };
 
 /**
- * Goal points must total exactly 6 across 2 to 6 goals (Rule 02).
- * Returns null when the split is legal.
- */
-const goalSplitError = (points) => {
-  const total = points.reduce((sum, p) => sum + p, 0);
-  if (points.some((p) => p < 1 || p > 3)) return 'Every goal is worth 1, 2 or 3 points';
-  if (points.length < 2) return 'At least 2 goals';
-  if (points.length > 6) return 'At most 6 goals';
-  if (total !== 6) return total < 6 ? `${6 - total} points still to spend` : `${total - 6} points over`;
-  return null;
-};
-
-/**
  * How far a reading sits between where the goal started and what counts as done.
  *
  * 1 means done. Rule 11 gives the challenge title to the most goals completed at
@@ -228,6 +215,5 @@ module.exports = {
   runSeason,
   currentFine,
   unpaidFines,
-  goalSplitError,
   goalEligibilityError,
 };

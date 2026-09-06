@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Gavel, Lock, Plus, Stamp, TrendingUp, Trash2 } from "lucide-react";
-import { Goal, GOAL_BUDGET, GOAL_TIERS, User } from "../types";
+import { Goal, User } from "../types";
 import { goalEligibilityError, goalProgressFraction } from "../utils/seasonEngine";
 import { apiFetch } from "../services/http";
 
 /**
- * Rule 02: every player spends exactly 6 points across 2 to 6 goals.
+ * A player's goals: what they are aiming at, and how far along they are.
  *
- * The budget is the whole interface — you can only add a goal the remaining
- * points can pay for, so an illegal split is never reachable.
+ * Goals carry no weight and cost nothing — they are here to motivate the
+ * player who set them, so there is no budget and no limit on how many.
  */
 
 interface GoalBoardProps {
@@ -32,13 +32,6 @@ interface Petition {
   status: string;
   raisedAt: string;
 }
-
-/** Heaviest goal reads heaviest. The tier is legible from the chip alone. */
-const TIER_STYLE: Record<number, string> = {
-  3: "bg-ink text-paper",
-  2: "bg-clean-100 text-clean-700",
-  1: "bg-paper-sunk text-ink-muted",
-};
 
 /** One logged reading, exactly as the server stores it. */
 export interface Reading {
@@ -248,7 +241,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     from: "",
     to: "",
     unit: "",
-    points: 3 as 1 | 2 | 3,
   });
   const [petitions, setPetitions] = useState<Petition[]>([]);
   /**
@@ -357,12 +349,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     [goals, selectedUserId]
   );
 
-  const spent = userGoals.reduce((sum, g) => sum + g.points, 0);
-  const left = GOAL_BUDGET - spent;
-  const legal = spent === GOAL_BUDGET && userGoals.length >= 2;
-
-  const canAfford = (points: number) => points <= left && userGoals.length < 6;
-
   /** Rule 04: your goals are yours to set. Everyone else's are read-only. */
   const isMine = currentUser?.id === selectedUserId;
 
@@ -382,7 +368,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     : null;
 
   const submit = () => {
-    if (!selectedUserId || !draft.description.trim() || !canAfford(draft.points)) return;
+    if (!selectedUserId || !draft.description.trim()) return;
     if (!isMine || eligibility) return;
 
     onAddGoal({
@@ -390,7 +376,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
       userId: selectedUserId,
       category: draft.category.trim() || "General",
       description: draft.description.trim(),
-      points: draft.points,
       baseline: `${baseline}${draft.unit ? ` ${draft.unit}` : ""}`,
       target: `${target}${draft.unit ? ` ${draft.unit}` : ""}`,
       baselineValue: baseline,
@@ -401,7 +386,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
       createdDate: new Date().toISOString().split("T")[0],
     });
 
-    setDraft({ category: "", description: "", from: "", to: "", unit: "", points: 1 });
+    setDraft({ category: "", description: "", from: "", to: "", unit: "" });
   };
 
   if (!selected) {
@@ -419,7 +404,8 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
         <div>
           <h2 className="display text-3xl text-ink">Goals</h2>
           <p className="text-sm text-ink-muted mt-1">
-            6 points each, across 2 to 6 goals. Agreed by the group before Week 0.
+            Yours to chase, as many as you like. No points, no budget — just what you're
+            aiming at and how far along you are.
           </p>
           {!isMine && selected ? (
             <p className="mt-2 flex items-center gap-1.5 text-sm text-skip-600">
@@ -447,36 +433,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
         </div>
       </div>
 
-      {/* The budget, spent left to right. */}
-      <div className="py-5">
-        <div
-          className="flex gap-1.5 mb-3"
-          role="meter"
-          aria-valuenow={spent}
-          aria-valuemin={0}
-          aria-valuemax={GOAL_BUDGET}
-          aria-label="Points spent"
-        >
-          {Array.from({ length: GOAL_BUDGET }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-3 flex-1 rounded-full transition-colors duration-200 ease-settle ${
-                i < spent ? (legal ? "bg-clean-500" : "bg-ink") : "bg-line"
-              }`}
-            />
-          ))}
-        </div>
-        <p className={`text-sm font-semibold tnum ${legal ? "text-clean-600" : "text-ink-muted"}`}>
-          {legal
-            ? `Legal — ${userGoals.map((g) => g.points).join("+")} = 6 across ${userGoals.length} goals`
-            : left > 0
-            ? `${spent} of 6 spent — ${left} point${left > 1 ? "s" : ""} left${
-                userGoals.length < 2 ? ", and 2 goals minimum" : ""
-              }`
-            : "One goal only — 2 goals minimum. Break it up."}
-        </p>
-      </div>
-
       <div className="divide-y divide-line border-y border-line">
         {userGoals.map((goal) => {
           // A goal with numbers. Its completion belongs to its readings.
@@ -487,11 +443,6 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
             className=" p-4 flex items-start gap-3
                        transition-shadow duration-150 ease-settle hover:shadow-lift"
           >
-            <span
-              className={`text-[11px] font-bold px-2 py-1 rounded-md tnum shrink-0 ${TIER_STYLE[goal.points]}`}
-            >
-              {goal.points} PT{goal.points > 1 ? "S" : ""}
-            </span>
             <div className="flex-1 min-w-0">
               <p className={`font-semibold ${goal.isCompleted ? "text-ink-muted line-through" : "text-ink"}`}>
                 {goal.description}
@@ -567,8 +518,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                       {petition.raisedByName} petitioned to replace this
                     </strong>{" "}
                     on {new Date(petition.raisedAt).toLocaleDateString()}. Set a meeting time. Only
-                    people who attend get a vote, the replacement must be worth {goal.points} point
-                    {goal.points > 1 ? "s" : ""} or more, and a tie keeps this goal.
+                    people who attend get a vote, and a tie keeps this goal.
                   </p>
                 );
               })()}
@@ -576,7 +526,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
             {isMine ? (
               <>
                 {/*
-                  Rule 11 gives the title to the most goals completed AT TARGET,
+                  Rule 06 gives the title to the most goals completed AT TARGET,
                   so a measured goal has no tick — the reading is what completes
                   it, and the server refuses a hand-tick either way. Goals from
                   before the numbers existed keep the toggle.
@@ -651,29 +601,8 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
         </p>
       ) : null}
 
-      {isMine && left > 0 && userGoals.length < 6 ? (
+      {isMine ? (
         <div className="pt-5 space-y-3">
-          <div className="flex gap-2">
-            {GOAL_TIERS.map((tier) => (
-              <button
-                key={tier.points}
-                onClick={() => setDraft({ ...draft, points: tier.points })}
-                disabled={!canAfford(tier.points)}
-                className={`flex-1 min-h-[56px] rounded-xl border text-sm font-semibold cursor-pointer
-                  transition-colors duration-150 ease-settle ${
-                    draft.points === tier.points
-                      ? "border-clean-500 bg-clean-50 text-clean-700"
-                      : "border-line text-ink hover:border-ink-faint"
-                  } disabled:opacity-35 disabled:cursor-not-allowed`}
-              >
-                {tier.name}
-                <span className={`block text-xs font-normal mt-1 tnum ${draft.points === tier.points ? "text-clean-600" : "text-ink-muted"}`}>
-                  {tier.points} pt{tier.points > 1 ? "s" : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-
           <input
             value={draft.description}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
@@ -738,13 +667,13 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
 
           <button
             onClick={submit}
-            disabled={!draft.description.trim() || !canAfford(draft.points) || !!eligibility || !hasNumbers}
+            disabled={!draft.description.trim() || !!eligibility || !hasNumbers}
             className="w-full flex items-center justify-center gap-2 min-h-[48px] bg-ink text-paper rounded-xl text-sm font-semibold
                        cursor-pointer transition-transform duration-150 ease-settle active:scale-[.99]
                        disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus size={16} />
-            Add goal for {draft.points} point{draft.points > 1 ? "s" : ""}
+            Add goal
           </button>
         </div>
       ) : null}

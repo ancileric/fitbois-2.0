@@ -32,8 +32,6 @@ export interface Goal {
   /** Free text now — players choose their own categories. */
   category: string;
   description: string;
-  /** 3 = Heavy, 2 = Medium, 1 = Light. Must total 6 across 2-6 goals. */
-  points: 1 | 2 | 3;
   /** Where you started, recorded at Week 0. */
   baseline?: string;
   /** What counts as completing it. */
@@ -49,20 +47,12 @@ export interface Goal {
   proofs: Proof[];
   createdDate: string;
 
-  /** @deprecated replaced by points */
+  /** @deprecated goals carry no weight in FitBros 3.0. */
   isDifficult?: boolean;
 }
 
 /** @deprecated FitBros 3.0 lets players name their own categories. */
 export type GoalCategory = string;
-
-/** Rule 02: 6 points, split across 2 to 6 goals. */
-export const GOAL_BUDGET = 6;
-export const GOAL_TIERS = [
-  { points: 3, name: 'Heavy' },
-  { points: 2, name: 'Medium' },
-  { points: 1, name: 'Light' },
-] as const;
 
 export interface Proof {
   id: string;

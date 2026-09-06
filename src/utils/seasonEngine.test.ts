@@ -1,6 +1,5 @@
 import {
   runSeason,
-  goalSplitError,
   goalProgressFraction,
   fineAtLevel,
   FINE_BASE,
@@ -196,27 +195,6 @@ describe('the pot (Rule 11)', () => {
 
   test('a clean season is in', () => {
     expect(season([5, 5, 5, 5]).potEligible).toBe(true);
-  });
-});
-
-describe('goal points (Rule 02)', () => {
-  test('all 7 legal splits pass', () => {
-    const legal = [[3, 3], [3, 2, 1], [3, 1, 1, 1], [2, 2, 2], [2, 2, 1, 1], [2, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1]];
-    legal.forEach((split) => expect(goalSplitError(split)).toBeNull());
-  });
-
-  test('wrong totals and single goals fail', () => {
-    expect(goalSplitError([3, 2])).toMatch(/still to spend/);
-    expect(goalSplitError([3, 3, 1])).toMatch(/over/);
-    expect(goalSplitError([3, 3, 3])).toMatch(/over/);
-  });
-
-  test('one goal is never legal, whatever it is worth', () => {
-    expect(goalSplitError([3])).not.toBeNull();
-  });
-
-  test('a goal outside 1-3 points is rejected', () => {
-    expect(goalSplitError([6])).toMatch(/1, 2 or 3/);
   });
 });
 

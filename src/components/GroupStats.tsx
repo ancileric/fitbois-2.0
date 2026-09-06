@@ -61,16 +61,18 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
       if (!goalRes.ok || cancelled) return;
       const goals: Goal[] = await goalRes.json();
 
-      const byUser: Record<string, { done: number; points: number }> = {};
+      // Every goal counts the same — they carry no weight, so this is a plain
+      // average of how far each one has come.
+      const byUser: Record<string, { done: number; count: number }> = {};
       goals.forEach((goal) => {
-        const bucket = (byUser[goal.userId] ??= { done: 0, points: 0 });
-        bucket.points += goal.points;
-        bucket.done += goal.points * goalFraction(goal, readings[goal.id]);
+        const bucket = (byUser[goal.userId] ??= { done: 0, count: 0 });
+        bucket.count += 1;
+        bucket.done += goalFraction(goal, readings[goal.id]);
       });
       if (!cancelled) {
         setGoalPct(
           Object.fromEntries(
-            Object.entries(byUser).map(([id, b]) => [id, b.points ? b.done / b.points : 0])
+            Object.entries(byUser).map(([id, b]) => [id, b.count ? b.done / b.count : 0])
           )
         );
       }
@@ -347,7 +349,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
       <div>
         <h4 className={SECTION_HEAD}>Goal progress</h4>
         <p className="text-sm text-ink-muted mt-0.5">
-          Each player's six points, weighted by how far each goal has come.
+          How far each player's goals have come, averaged across all of them.
         </p>
 
         {goalPct === null ? (

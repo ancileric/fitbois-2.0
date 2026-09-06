@@ -136,19 +136,10 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
                 const measured = goal.baselineValue != null && goal.targetValue != null;
                 return (
                   <li key={goal.id} className="py-3">
-                    <div className="flex items-start gap-2">
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-paper-sunk text-ink-muted tnum shrink-0">
-                        {goal.points} PT{goal.points > 1 ? "S" : ""}
-                      </span>
-                      <p className={`text-sm flex-1 ${goal.isCompleted ? "text-ink-muted line-through" : "text-ink"}`}>
-                        {goal.description}
-                      </p>
-                    </div>
-                    {measured ? (
-                      <div className="pl-14">
-                        <GoalTrack goal={goal} readings={progress[goal.id] ?? []} />
-                      </div>
-                    ) : null}
+                    <p className={`text-sm ${goal.isCompleted ? "text-ink-muted line-through" : "text-ink"}`}>
+                      {goal.description}
+                    </p>
+                    {measured ? <GoalTrack goal={goal} readings={progress[goal.id] ?? []} /> : null}
                   </li>
                 );
               })}
