@@ -59,7 +59,7 @@ export const ALL_RULES: Rule[] = [
       "Week-end day, fixed for the season",
     ],
     table: [],
-    ties: ["r1", "r5", "r12"],
+    ties: ["r1", "r5", ],
     hasDefault: false,
   },
   {
@@ -99,7 +99,7 @@ export const ALL_RULES: Rule[] = [
       ["Next two", "₹400"],
       ["Then", "₹800, ₹1,600, ₹3,200 …"],
     ],
-    ties: ["r5", "r11", "r12"],
+    ties: ["r5", "r11", ],
     hasDefault: false,
   },
   {
@@ -115,20 +115,6 @@ export const ALL_RULES: Rule[] = [
     ],
     table: [],
     ties: ["r7"],
-    hasDefault: false,
-  },
-  {
-    id: "r12",
-    number: "06",
-    title: "Admin",
-    stage: "How it ends",
-    summary: "Scorekeeper and Treasurer. Two people, both unassigned.",
-    paragraphs: [
-      "Before Week 1, held by different people: Scorekeeper closes the sheet and posts fines, Treasurer holds the money.",
-    ],
-    points: [],
-    table: [],
-    ties: ["r5", "r7"],
     hasDefault: false,
   },
 ];
