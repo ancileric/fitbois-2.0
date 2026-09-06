@@ -1,28 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
-import {
-  User,
-  Goal,
-  WeeklyPlan,
-  WorkoutDay,
-  AdminSettings,
-} from "./types";
+import { User, Goal, WorkoutDay, AdminSettings } from "./types";
 import Header from "./components/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
 import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
 import { apiService } from "./services/api";
-import { updateAllUsersConsistency } from "./utils/consistencyCalculator";
-import { getCurrentWeek } from "./utils/dateUtils";
+import { apiFetch, isAdmin } from "./services/http";
 
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
-const Workout = lazy(() => import("./components/Workout"));
-const Goals = lazy(() => import("./components/Goals"));
-const Dashboard = lazy(() => import("./components/Dashboard"));
+const GroupBoard = lazy(() => import("./components/GroupBoard"));
+const Rules = lazy(() => import("./components/Rules"));
+const MeView = lazy(() => import("./components/MeView"));
+
+
 const Admin = lazy(() => import("./components/Admin"));
 
-type ActiveView = "workout" | "goals" | "dashboard" | "admin";
+type ActiveView = "me" | "group" | "rules" | "admin";
 
 const SNAPSHOT_KEY = "fitbois:snapshot";
 const SNAPSHOT_VERSION = 1;
@@ -34,7 +29,6 @@ interface Snapshot {
   users: User[];
   workoutDays: WorkoutDay[];
   goals: Goal[];
-  weeklyPlans: WeeklyPlan[];
 }
 
 const readSnapshot = (): Snapshot | null => {
@@ -62,12 +56,6 @@ const writeSnapshot = (snap: Omit<Snapshot, "version" | "savedAt">): void => {
   }
 };
 
-const userConsistencyEqual = (a: User, b: User): boolean =>
-  a.cleanWeeks === b.cleanWeeks &&
-  a.missedWeeks === b.missedWeeks &&
-  a.currentConsistencyLevel === b.currentConsistencyLevel &&
-  a.totalPoints === b.totalPoints &&
-  a.isActive === b.isActive;
 
 const HYDRATING_BANNER_DELAY_MS = 1500;
 
@@ -83,20 +71,27 @@ function AppContent() {
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>(
     initialSnapshot?.workoutDays ?? []
   );
-  const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>(
-    initialSnapshot?.weeklyPlans ?? []
-  );
-  const [adminSettings] = useState<AdminSettings>({
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
     challengeEndDate: "2026-07-31",
     currentWeek: 1,
     isActive: true,
   });
-  const [currentUser, setCurrentUser] = useState<User | null>(
-    initialSnapshot?.users[0] ?? null
-  );
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const remembered = localStorage.getItem("playerId");
+    const seeded = initialSnapshot?.users ?? [];
+    return seeded.find((u) => u.id === remembered) ?? seeded[0] ?? null;
+  });
+  const admin = isAdmin();
   const [activeView, setActiveView] = useState<ActiveView>(
-    () => (localStorage.getItem("activeView") as ActiveView) ?? "workout"
+    () => {
+      // A view name saved by an older build must not leave the page blank.
+      const saved = localStorage.getItem("activeView");
+      if (saved === "admin" && !isAdmin()) return "me";
+      return saved === "me" || saved === "group" || saved === "rules" || saved === "admin"
+        ? saved
+        : "me";
+    }
   );
   const [isOffline, setIsOffline] = useState(false);
   const [snapshotSavedAt, setSnapshotSavedAt] = useState<number | null>(
@@ -120,43 +115,35 @@ function AppContent() {
     localStorage.setItem("activeView", activeView);
   }, [activeView]);
 
+  // One clock for the whole app: the week the server is scoring against.
+  useEffect(() => {
+    apiFetch(`/settings`)
+      .then((res: Response) => (res.ok ? res.json() : null))
+      .then((settings: { currentWeek?: number } | null) => {
+        if (settings?.currentWeek) {
+          setAdminSettings((prev) => ({ ...prev, ...settings }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Derived state (price level, fines) is computed by the server from
+   * the workout sheet, so the client only re-reads it. Kept as a hook because the
+   * screens still call it after a change lands.
+   */
   const recalculateUserConsistency = useCallback(() => {
     if (recalcTimerRef.current) clearTimeout(recalcTimerRef.current);
     recalcTimerRef.current = setTimeout(() => {
-      setUsers((currentUsers) => {
-        const currentWeek = getCurrentWeek();
-        const goalData = goals.map((g) => ({
-          userId: g.userId,
-          isCompleted: g.isCompleted,
-        }));
-
-        const updatedUsers = updateAllUsersConsistency(
-          currentUsers,
-          workoutDays,
-          goalData,
-          currentWeek,
-          weeklyPlans,
-        );
-
-        if (!isOffline) {
-          updatedUsers
-            .filter((u) => {
-              const original = currentUsers.find((o) => o.id === u.id);
-              return original && !userConsistencyEqual(original, u);
-            })
-            .forEach((u) => {
-              apiService.updateUser(u.id, u).catch((error) => {
-                console.error("Error updating user in database:", error);
-              });
-            });
-        }
-
-        return updatedUsers;
-      });
+      if (isOffline) return;
+      apiService
+        .getUsers()
+        .then((freshUsers) => setUsers(freshUsers))
+        .catch((error) => console.error("Error refreshing users:", error));
     }, 300);
-  }, [goals, workoutDays, weeklyPlans, isOffline]);
+  }, [isOffline]);
 
   const clearRetryTimer = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -167,63 +154,32 @@ function AppContent() {
 
   const loadData = useCallback(async (): Promise<boolean> => {
     try {
-      // Fire all four reads in parallel. A rejection on any required call
+      // Fire all three reads in parallel. A rejection on any required call
       // surfaces as "API unreachable" via the catch below — no separate
       // /api/health round-trip needed.
-      const [dbUsers, dbWorkouts, dbGoals, dbPlans] = await Promise.all([
+      const [dbUsers, dbWorkouts, dbGoals] = await Promise.all([
         apiService.getUsers(),
         apiService.getAllWorkouts(),
         apiService.getAllGoals(),
-        apiService.getWeeklyPlans().catch(() => [] as WeeklyPlan[]),
       ]);
 
-      const currentWeek = getCurrentWeek();
-      const goalData = dbGoals.map((g) => ({
-        userId: g.userId,
-        isCompleted: g.isCompleted,
-      }));
-      const recalculated = updateAllUsersConsistency(
-        dbUsers,
-        dbWorkouts,
-        goalData,
-        currentWeek,
-        dbPlans,
-      );
-
-      const drifted = recalculated.filter((u) => {
-        const original = dbUsers.find((o) => o.id === u.id);
-        return original && !userConsistencyEqual(original, u);
-      });
-
-      setUsers(recalculated);
+      setUsers(dbUsers);
       setWorkoutDays(dbWorkouts);
       setGoals(dbGoals);
-      setWeeklyPlans(dbPlans);
       setCurrentUser((prev) => {
-        if (prev) {
-          const match = recalculated.find((u) => u.id === prev.id);
-          if (match) return match;
-        }
-        return recalculated[0] || null;
+        const remembered = prev?.id ?? localStorage.getItem("playerId");
+        return dbUsers.find((u) => u.id === remembered) ?? dbUsers[0] ?? null;
       });
 
       writeSnapshot({
-        users: recalculated,
+        users: dbUsers,
         workoutDays: dbWorkouts,
         goals: dbGoals,
-        weeklyPlans: dbPlans,
       });
       setSnapshotSavedAt(Date.now());
       setIsOffline(false);
       setLoadFailed(false);
       retryAttemptRef.current = 0;
-
-      // Persist recomputed consistency for any users that drifted from DB.
-      drifted.forEach((u) => {
-        apiService.updateUser(u.id, u).catch((error) => {
-          console.error("Error syncing consistency to database:", error);
-        });
-      });
 
       return true;
     } catch (error) {
@@ -428,44 +384,6 @@ function AppContent() {
     }
   };
 
-  const updateWeeklyPlan = async (plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: 'user' | 'admin';
-  }) => {
-    if (isOffline) {
-      showToast("Offline — changes can't be saved yet.", "error");
-      throw new Error("Offline");
-    }
-    if (isHydrating) {
-      showToast("Loading latest — try again in a moment.", "error");
-      throw new Error("Hydrating");
-    }
-    try {
-      const savedPlan = await apiService.saveWeeklyPlan(plan);
-      setWeeklyPlans((prev) => {
-        const existing = prev.find(
-          (p) => p.userId === savedPlan.userId && p.week === savedPlan.week,
-        );
-        return existing
-          ? prev.map((p) => (p.id === existing.id ? savedPlan : p))
-          : [...prev, savedPlan];
-      });
-      recalculateUserConsistency();
-      showToast(
-        `Plan saved for Week ${savedPlan.week} (${savedPlan.committedDays.length} days)`,
-        "success",
-      );
-      return savedPlan;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("Error saving weekly plan:", error);
-      showToast(`Failed to save plan: ${msg}`, "error");
-      throw error;
-    }
-  };
-
   const deleteUser = async (userId: string) => {
     if (blockIfOffline()) return;
     try {
@@ -476,9 +394,6 @@ function AppContent() {
       setWorkoutDays((prevWorkouts) =>
         prevWorkouts.filter((w) => w.userId !== userId),
       );
-      setWeeklyPlans((prevPlans) =>
-        prevPlans.filter((p) => p.userId !== userId),
-      );
     } catch (error) {
       console.error("Error deleting user from database:", error);
       showToast("Failed to delete user. Please try again.", "error");
@@ -487,19 +402,19 @@ function AppContent() {
 
   if (loadFailed && !currentUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-paper flex items-center justify-center p-4">
         <div className="text-center max-w-sm">
-          <h1 className="text-xl font-semibold text-gray-900 mb-2">
-            Can't reach FitBois
+          <h1 className="text-xl font-semibold text-ink mb-2">
+            Can't reach FitBros
           </h1>
-          <p className="text-gray-600 mb-6">
+          <p className="text-ink-muted mb-6">
             We couldn't load your data and no offline copy is available on this
             device. Check your connection and try again.
           </p>
           <button
             onClick={manualRetry}
             disabled={isRetrying}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium disabled:opacity-50"
+            className="px-4 py-2 bg-clean-600 text-paper rounded-lg font-medium disabled:opacity-50"
           >
             {isRetrying ? "Retrying…" : "Retry"}
           </button>
@@ -510,17 +425,17 @@ function AppContent() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-paper flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading FitBois 2.0...</p>
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-clean-500 mx-auto"></div>
+          <p className="mt-4 text-ink-muted">Loading the season…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-paper">
       {isOffline ? (
         <OfflineBanner
           mode="offline"
@@ -536,60 +451,61 @@ function AppContent() {
           isRetrying={isRetrying}
         />
       ) : null}
-      <Header activeView={activeView} onViewChange={setActiveView} />
+      <Header
+        activeView={activeView}
+        onViewChange={setActiveView}
+        isAdmin={admin}
+        users={users}
+        currentUser={currentUser}
+        onChangePlayer={(id) => {
+          const next = users.find((u) => u.id === id) ?? null;
+          if (next) {
+            localStorage.setItem("playerId", next.id);
+            setCurrentUser(next);
+          }
+        }}
+      />
 
-      <main className="container mx-auto px-4 py-6 pb-24 md:pb-8">
+      <main className="max-w-5xl mx-auto px-5 sm:px-8 py-8 pb-28 md:pb-12">
         <ErrorBoundary>
           <Suspense
             fallback={
               <div className="flex justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-clean-500"></div>
               </div>
             }
           >
-            {activeView === "workout" && (
-              <Workout
-                users={users}
-                workoutDays={workoutDays}
-                weeklyPlans={weeklyPlans}
-                adminSettings={adminSettings}
-                onUpdateWorkoutDay={updateWorkoutDay}
-                onUpdateWeeklyPlan={updateWeeklyPlan}
-              />
-            )}
-
-            {activeView === "goals" && (
-              <Goals
-                user={currentUser}
+            {activeView === "me" && (
+              <MeView
+                currentUser={currentUser}
                 users={users}
                 goals={goals}
+                workoutDays={workoutDays}
+                onUpdateWorkoutDay={updateWorkoutDay}
                 onAddGoal={addGoal}
                 onUpdateGoal={updateGoal}
                 onDeleteGoal={deleteGoal}
               />
             )}
 
-            {activeView === "dashboard" && (
-              <Dashboard
-                currentUser={currentUser}
-                users={users}
-                goals={goals}
-                workoutDays={workoutDays}
-                weeklyPlans={weeklyPlans}
-              />
-            )}
+            {activeView === "group" && <GroupBoard currentUser={currentUser} goals={goals} />}
 
-            {activeView === "admin" && (
+            {activeView === "rules" && <Rules />}
+
+            {activeView === "admin" && admin && (
               <Admin
                 users={users}
                 workoutDays={workoutDays}
                 adminSettings={adminSettings}
                 onUpdateUser={updateUser}
                 onDeleteUser={deleteUser}
-                onUpdateWorkoutDay={updateWorkoutDay}
                 onRecalculateConsistency={recalculateUserConsistency}
+                onSettingsChange={(settings) =>
+                  setAdminSettings((prev) => ({ ...prev, ...settings }))
+                }
               />
             )}
+
           </Suspense>
         </ErrorBoundary>
       </main>

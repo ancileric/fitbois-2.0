@@ -1,17 +1,12 @@
-import { User, Goal, WorkoutDay, WeeklyPlan } from '../types';
+import { adminKey, currentPlayerId } from './http';
+import { User, Goal, WorkoutDay } from '../types';
 
-// In production, use relative URL since frontend and backend are on same server
-// In development, use localhost:5000
+// In production the API is served from the same origin as the app, so a
+// relative path is right. In development it is the local server on 5050.
 const API_BASE_URL = process.env.NODE_ENV === 'production'
   ? '/api'
-  : (process.env.REACT_APP_API_URL || 'http://localhost:5000/api');
+  : (process.env.REACT_APP_API_URL || 'http://localhost:5050/api');
 const REQUEST_TIMEOUT = 30000; // 30 seconds
-const CACHE_TTL = 5000; // 5 seconds cache for GET requests
-
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-}
 
 interface PendingRequest<T> {
   promise: Promise<T>;
@@ -19,26 +14,16 @@ interface PendingRequest<T> {
 }
 
 class ApiService {
-  private cache: Map<string, CacheEntry<unknown>> = new Map();
-  private pendingRequests: Map<string, PendingRequest<unknown>> = new Map();
-
   /**
-   * Clear the cache for a specific endpoint or all endpoints
+   * In-flight GETs, so the same read fired twice at once costs one round trip.
+   *
+   * This is a coalescer, not a cache — an entry lives only until the request
+   * settles, so a read that starts after a write always sees the write. The
+   * 5-second response cache that used to sit here did not: a POST cleared only
+   * the keys matching its own resource, and App's follow-up /users read came
+   * back from a still-warm entry with the pre-write body.
    */
-  clearCache(endpoint?: string): void {
-    if (endpoint) {
-      // Clear specific endpoint and related endpoints
-      const keysToDelete: string[] = [];
-      this.cache.forEach((_, key) => {
-        if (key.includes(endpoint)) {
-          keysToDelete.push(key);
-        }
-      });
-      keysToDelete.forEach(key => this.cache.delete(key));
-    } else {
-      this.cache.clear();
-    }
-  }
+  private pendingRequests: Map<string, PendingRequest<unknown>> = new Map();
 
   /**
    * Fetch with timeout support
@@ -71,29 +56,25 @@ class ApiService {
     const method = options?.method || 'GET';
     const cacheKey = `${method}:${url}`;
 
-    // For GET requests, check cache first
     if (method === 'GET') {
-      const cached = this.cache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return cached.data as T;
-      }
-
-      // Check for pending request (deduplication)
       const pending = this.pendingRequests.get(cacheKey);
       if (pending && Date.now() - pending.timestamp < REQUEST_TIMEOUT) {
         return pending.promise as Promise<T>;
       }
     }
 
-    // Create the request promise
     const requestPromise = (async (): Promise<T> => {
       try {
         const response = await this.fetchWithTimeout(url, {
+          ...options,
           headers: {
             'Content-Type': 'application/json',
+            // Every write states which player is making it; the server holds us to it.
+            ...(currentPlayerId() ? { 'x-player-id': currentPlayerId() as string } : {}),
+            // Admin routes (players, the season clock) want the shared key too.
+            ...(adminKey() ? { 'x-admin-key': adminKey() as string } : {}),
             ...options?.headers,
           },
-          ...options,
         });
 
         if (!response.ok) {
@@ -101,24 +82,12 @@ class ApiService {
           throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const data = await response.json();
-
-        // Cache GET responses
-        if (method === 'GET') {
-          this.cache.set(cacheKey, { data, timestamp: Date.now() });
-        } else {
-          // Invalidate related caches on mutations
-          this.invalidateRelatedCaches(endpoint);
-        }
-
-        return data;
+        return await response.json();
       } finally {
-        // Remove from pending requests
         this.pendingRequests.delete(cacheKey);
       }
     })();
 
-    // Track pending GET requests for deduplication
     if (method === 'GET') {
       this.pendingRequests.set(cacheKey, { promise: requestPromise, timestamp: Date.now() });
     }
@@ -126,32 +95,10 @@ class ApiService {
     return requestPromise;
   }
 
-  /**
-   * Invalidate caches related to a mutated endpoint
-   */
-  private invalidateRelatedCaches(endpoint: string): void {
-    // Extract the resource type from the endpoint
-    const resourceMatch = endpoint.match(/^\/(\w+)/);
-    if (resourceMatch) {
-      const resource = resourceMatch[1];
-      const keysToDelete: string[] = [];
-      this.cache.forEach((_, key) => {
-        if (key.includes(`/${resource}`)) {
-          keysToDelete.push(key);
-        }
-      });
-      keysToDelete.forEach(key => this.cache.delete(key));
-    }
-  }
-
   // ==================== USER METHODS ====================
 
   async getUsers(): Promise<User[]> {
     return this.fetchApi<User[]>('/users');
-  }
-
-  async getUser(id: string): Promise<User> {
-    return this.fetchApi<User>(`/users/${id}`);
   }
 
   async createUser(userData: Partial<User>): Promise<User> {
@@ -180,14 +127,6 @@ class ApiService {
     return this.fetchApi<WorkoutDay[]>('/workouts');
   }
 
-  async getUserWorkouts(userId: string): Promise<WorkoutDay[]> {
-    return this.fetchApi<WorkoutDay[]>(`/workouts/user/${userId}`);
-  }
-
-  async getWorkouts(userId: string, week: number): Promise<WorkoutDay[]> {
-    return this.fetchApi<WorkoutDay[]>(`/workouts/${userId}/${week}`);
-  }
-
   async saveWorkout(workoutData: Partial<WorkoutDay>): Promise<WorkoutDay> {
     return this.fetchApi<WorkoutDay>('/workouts', {
       method: 'POST',
@@ -195,40 +134,10 @@ class ApiService {
     });
   }
 
-  async deleteWorkout(id: string): Promise<void> {
-    await this.fetchApi<void>(`/workouts/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getWorkoutStats(userId: string): Promise<{
-    totalWorkouts: number;
-    completedWorkouts: number;
-    weeksWithData: number;
-    latestWeek: number;
-    completionRate: number;
-  }> {
-    return this.fetchApi(`/workouts/stats/${userId}`);
-  }
-
-  // ==================== HEALTH CHECK ====================
-
-  async healthCheck(): Promise<{ status: string; message: string }> {
-    return this.fetchApi<{ status: string; message: string }>('/health');
-  }
-
   // ==================== GOALS METHODS ====================
 
   async getAllGoals(): Promise<Goal[]> {
     return this.fetchApi<Goal[]>('/goals');
-  }
-
-  async getUserGoals(userId: string): Promise<Goal[]> {
-    return this.fetchApi<Goal[]>(`/goals/user/${userId}`);
-  }
-
-  async getGoal(id: string): Promise<Goal> {
-    return this.fetchApi<Goal>(`/goals/${id}`);
   }
 
   async createGoal(goalData: Partial<Goal>): Promise<Goal> {
@@ -249,56 +158,6 @@ class ApiService {
     await this.fetchApi<void>(`/goals/${id}`, {
       method: 'DELETE',
     });
-  }
-
-  async getGoalStats(userId: string): Promise<{
-    totalGoals: number;
-    completedGoals: number;
-    difficultGoals: number;
-    categoriesCovered: number;
-    completionRate: number;
-  }> {
-    return this.fetchApi(`/goals/stats/${userId}`);
-  }
-
-  // ==================== WEEKLY PLANS METHODS ====================
-
-  async getWeeklyPlans(): Promise<WeeklyPlan[]> {
-    return this.fetchApi<WeeklyPlan[]>('/weekly-plans');
-  }
-
-  async getWeeklyPlan(userId: string, week: number): Promise<WeeklyPlan> {
-    return this.fetchApi<WeeklyPlan>(`/weekly-plans/${userId}/${week}`);
-  }
-
-  async saveWeeklyPlan(plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: 'user' | 'admin';
-  }): Promise<WeeklyPlan> {
-    return this.fetchApi<WeeklyPlan>('/weekly-plans', {
-      method: 'POST',
-      body: JSON.stringify(plan),
-    });
-  }
-
-  async deleteWeeklyPlan(userId: string, week: number): Promise<void> {
-    await this.fetchApi<void>(`/weekly-plans/${userId}/${week}`, {
-      method: 'DELETE',
-    });
-  }
-
-  // ==================== CONNECTION TEST ====================
-
-  async testConnection(): Promise<boolean> {
-    try {
-      await this.healthCheck();
-      return true;
-    } catch (error) {
-      console.error('Database connection test failed:', error);
-      return false;
-    }
   }
 }
 

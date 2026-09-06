@@ -5,6 +5,14 @@ const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
+const engine = require("../src/utils/seasonEngine");
+
+/**
+ * How long a fine has before it reads as overdue. The engine used to own this;
+ * it stopped being a rule input when standing was removed, so it lives here now
+ * — and defers to the engine if it ever exports it again.
+ */
+const { PAYMENT_GRACE_HOURS } = engine;
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -17,10 +25,19 @@ const debug = isProduction ? () => {} : console.log;
 const corsOptions = {
   origin: isProduction
     ? process.env.FRONTEND_URL || true
-    : ["http://localhost:3000", "http://127.0.0.1:3000"],
+    : // Dev also serves phones on the same wifi, so allow private-network origins.
+      (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const allowed =
+          /^http:\/\/localhost:\d+$/.test(origin) ||
+          /^http:\/\/127\.0\.0\.1:\d+$/.test(origin) ||
+          /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) ||
+          /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin);
+        callback(allowed ? null : new Error("Origin not allowed"), allowed);
+      },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-player-id", "x-admin-key"],
 };
 
 // Middleware
@@ -40,108 +57,15 @@ if (isProduction && !isVercel) {
 
 // ==================== DATABASE INITIALIZATION ====================
 
+const SEASON_WEEKS_MS = engine.SEASON_WEEKS * 7 * 24 * 60 * 60 * 1000;
+
 let initPromise = null;
 
 async function runDatabaseInit() {
   console.log("🚀 Initializing database...");
 
-  // Single batched DDL statement — reduces cold-start latency by avoiding
-  // multiple sequential round-trips to the database.
-  const ddl = `
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      avatar TEXT,
-      start_date TEXT NOT NULL,
-      current_consistency_level INTEGER NOT NULL DEFAULT 5,
-      clean_weeks INTEGER NOT NULL DEFAULT 0,
-      missed_weeks INTEGER NOT NULL DEFAULT 0,
-      total_points INTEGER NOT NULL DEFAULT 0,
-      is_active BOOLEAN NOT NULL DEFAULT 1,
-      special_starting_level INTEGER,
-      reactivated_at_week INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS goals (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      category TEXT NOT NULL,
-      description TEXT NOT NULL,
-      is_difficult BOOLEAN NOT NULL DEFAULT 0,
-      is_completed BOOLEAN NOT NULL DEFAULT 0,
-      completed_date TEXT,
-      created_date TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, category)
-    );
-    CREATE TABLE IF NOT EXISTS workout_days (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      week INTEGER NOT NULL,
-      day_of_week INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      is_completed BOOLEAN NOT NULL DEFAULT 0,
-      workout_type TEXT,
-      notes TEXT,
-      marked_by TEXT NOT NULL DEFAULT 'admin',
-      timestamp TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, week, day_of_week)
-    );
-    CREATE TABLE IF NOT EXISTS proofs (
-      id TEXT PRIMARY KEY,
-      goal_id TEXT,
-      user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      url TEXT NOT NULL,
-      description TEXT,
-      timestamp TEXT NOT NULL,
-      week INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE SET NULL
-    );
-    CREATE TABLE IF NOT EXISTS weekly_updates (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      week INTEGER NOT NULL,
-      year INTEGER NOT NULL,
-      update_count INTEGER NOT NULL,
-      required_updates INTEGER NOT NULL,
-      is_complete BOOLEAN NOT NULL DEFAULT 0,
-      submitted_date TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, week, year)
-    );
-    CREATE TABLE IF NOT EXISTS weekly_plans (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      week INTEGER NOT NULL,
-      committed_days TEXT NOT NULL,
-      committed_at TEXT NOT NULL,
-      created_by TEXT NOT NULL DEFAULT 'admin',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, week)
-    );
-    CREATE TABLE IF NOT EXISTS admin_settings (
-      id INTEGER PRIMARY KEY,
-      challenge_start_date TEXT NOT NULL,
-      challenge_end_date TEXT NOT NULL,
-      current_week INTEGER NOT NULL DEFAULT 1,
-      is_active BOOLEAN NOT NULL DEFAULT 1,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_workout_user ON workout_days (user_id);
-    CREATE INDEX IF NOT EXISTS idx_workout_week ON workout_days (week);
-    CREATE INDEX IF NOT EXISTS idx_workout_user_week ON workout_days (user_id, week);
-    CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id);
-    CREATE INDEX IF NOT EXISTS idx_goals_category ON goals (category);
-    CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id);
-    CREATE INDEX IF NOT EXISTS idx_weekly_plans_week ON weekly_plans (week);
-  `;
+  const { DDL, INDEXES, MIGRATIONS } = require("./schema");
+  const ddl = DDL;
 
   // libsql/client supports executeMultiple for batched multi-statement SQL
   if (typeof db.execMultiple === "function") {
@@ -158,6 +82,40 @@ async function runDatabaseInit() {
       } catch (err) {
         console.error("DDL error:", err.message);
       }
+    }
+  }
+
+  // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
+  // CREATE TABLE IF NOT EXISTS won't add columns to a table that already exists.
+  const addColumns = MIGRATIONS;
+  for (const sql of addColumns) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      if (!String(err.message).includes("duplicate column")) {
+        console.error("Migration note:", err.message);
+      }
+    }
+  }
+
+  // A season needs a row to be a season: every screen reads the current week
+  // from here, and nothing else creates it, so a fresh database would answer
+  // "Season not configured" forever. Admin edits the dates afterwards.
+  const seasonStart = new Date().toISOString().slice(0, 10);
+  const seasonEnd = new Date(Date.now() + SEASON_WEEKS_MS).toISOString().slice(0, 10);
+  await db.run(
+    `INSERT OR IGNORE INTO admin_settings
+       (id, challenge_start_date, challenge_end_date, current_week, is_active)
+     VALUES (1, ?, ?, 1, 1)`,
+    [seasonStart, seasonEnd]
+  );
+
+  // Indexes last: some of them cover columns the ALTERs above just added.
+  if (typeof db.execMultiple === "function") {
+    await db.execMultiple(INDEXES);
+  } else {
+    for (const stmt of INDEXES.split(";").map((s) => s.trim()).filter(Boolean)) {
+      await db.exec(stmt);
     }
   }
 
@@ -221,59 +179,83 @@ const validateBoolean = (value, fieldName) => {
   return null;
 };
 
-const validateConsistencyLevel = (value) => {
+const validatePriceLevel = (value) => {
   const level = Number(value);
-  if (![3, 4, 5].includes(level)) {
-    return "Consistency level must be 3, 4, or 5";
-  }
+  // The ladder doubles for as long as someone keeps missing, so there is no top
+  // rung to validate against — only "is this a real level".
+  if (!Number.isInteger(level) || level < 1) return "Price level must be a whole number, 1 or higher";
   return null;
 };
 
-const validateGoalCategory = (value) => {
-  const validCategories = [
-    "cardio",
-    "strength",
-    "consistency",
-    "sports",
-    "personal-growth",
-  ];
-  if (!validCategories.includes(value)) {
-    return `Category must be one of: ${validCategories.join(", ")}`;
-  }
-  return null;
-};
+// Players name their own categories now (Rule 01), so this only checks it is usable text.
+const validateGoalCategory = (value) => validateString(value, "Category", 1, 60);
 
 const sanitizeString = (value) => {
   if (typeof value !== "string") return value;
   return value.trim().replace(/[<>]/g, "");
 };
 
-// ==================== IST DATE HELPERS ====================
-// Challenge start (Monday, IST). MUST match frontend src/utils/dateUtils.ts.
-const CHALLENGE_START_UTC_MS = Date.UTC(2026, 0, 19);
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+/**
+ * The season's current week, from admin_settings — the same row the engine uses.
+ * Date arithmetic used to answer this separately, which let the plan routes and
+ * the fines disagree about what week it was.
+ */
+async function seasonCurrentWeek() {
+  const row = await db.get("SELECT current_week FROM admin_settings WHERE id = 1");
+  return row ? Number(row.current_week) : 1;
+}
 
-const getCurrentWeekIST = () => {
-  const istNow = new Date(Date.now() + IST_OFFSET_MS);
-  const istMidnightUTC = Date.UTC(
-    istNow.getUTCFullYear(),
-    istNow.getUTCMonth(),
-    istNow.getUTCDate()
-  );
-  const daysDiff = Math.floor(
-    (istMidnightUTC - CHALLENGE_START_UTC_MS) / 86400000
-  );
-  if (daysDiff < 0) return 0;
-  return Math.floor(daysDiff / 7) + 1;
-};
+// ==================== OWNERSHIP ====================
 
-const currentISTDayOfWeek = () => {
-  const istNow = new Date(Date.now() + IST_OFFSET_MS);
-  const jsDow = istNow.getUTCDay();
-  return jsDow === 0 ? 7 : jsDow;
-};
+/**
+ * Who is making this request.
+ *
+ * This is an ownership check, not authentication: the client states who it is
+ * and the server holds it to that. It stops one player writing to another's
+ * record — the common accident in a shared app — but anyone who can call the API
+ * directly can still claim to be someone else. Real auth is a separate job, and
+ * this is the seam it slots into.
+ */
+const actorOf = (req) => req.header("x-player-id") || req.body?.actorId || null;
 
-const requiredWorkoutsForLevel = (level) => (Number(level) >= 5 ? 5 : 4);
+const isAdminRequest = (req) =>
+  Boolean(process.env.ADMIN_KEY) && req.header("x-admin-key") === process.env.ADMIN_KEY;
+
+let warnedNoAdminKey = false;
+
+/**
+ * The admin seat is one shared secret, not a login: whoever holds ADMIN_KEY can
+ * add or remove players and close a week. With no key configured — local work —
+ * the routes stay open, because locking the only admin out of a development
+ * database helps nobody. Production sets the key.
+ */
+function denyUnlessAdmin(req, res) {
+  if (isAdminRequest(req)) return false;
+  if (!process.env.ADMIN_KEY) {
+    if (!warnedNoAdminKey) {
+      warnedNoAdminKey = true;
+      console.warn("⚠️  ADMIN_KEY is not set — admin routes are open. Set it in production.");
+    }
+    return false;
+  }
+  res.status(403).json({ error: "Admin only. This one belongs to whoever runs the season." });
+  return true;
+}
+
+/** Rejects the request unless the caller owns `ownerId` (or is an admin). */
+function denyUnlessOwner(req, res, ownerId) {
+  if (isAdminRequest(req)) return false;
+  const actor = actorOf(req);
+  if (!actor) {
+    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
+    return true;
+  }
+  if (actor !== ownerId) {
+    res.status(403).json({ error: "That record belongs to someone else" });
+    return true;
+  }
+  return false;
+}
 
 // ==================== USER ROUTES ====================
 
@@ -281,9 +263,9 @@ app.get("/api/users", async (req, res) => {
   try {
     const rows = await db.all(`
       SELECT
-        id, name, avatar, start_date, current_consistency_level,
-        clean_weeks, missed_weeks, total_points, is_active,
-        special_starting_level, reactivated_at_week, created_at, updated_at
+        id, name, avatar, start_date, price_level,
+        clean_weeks, missed_weeks,
+        created_at, updated_at
       FROM users
       ORDER BY name COLLATE NOCASE ASC
     `);
@@ -293,18 +275,11 @@ app.get("/api/users", async (req, res) => {
       name: row.name,
       avatar: row.avatar,
       startDate: row.start_date,
-      currentConsistencyLevel: row.current_consistency_level,
-      cleanWeeks: row.clean_weeks,
-      missedWeeks: row.missed_weeks,
-      totalPoints: row.total_points,
-      isActive: Boolean(row.is_active),
-      specialRules:
-        row.special_starting_level || row.reactivated_at_week
-          ? {
-              startingLevel: row.special_starting_level || undefined,
-              reactivatedAtWeek: row.reactivated_at_week || undefined,
-            }
-          : undefined,
+      priceLevel: Number(row.price_level),
+      cleanWeeks: Number(row.clean_weeks),
+      missedWeeks: Number(row.missed_weeks),
+      // Missing never removes you from the season.
+      isActive: true,
     }));
 
     debug(`Fetched ${users.length} users`);
@@ -319,9 +294,9 @@ app.get("/api/users/:id", async (req, res) => {
   try {
     const row = await db.get(
       `SELECT
-        id, name, avatar, start_date, current_consistency_level,
-        clean_weeks, missed_weeks, total_points, is_active,
-        special_starting_level, reactivated_at_week, created_at, updated_at
+        id, name, avatar, start_date, price_level,
+        clean_weeks, missed_weeks,
+        created_at, updated_at
       FROM users WHERE id = ?`,
       [req.params.id]
     );
@@ -336,18 +311,11 @@ app.get("/api/users/:id", async (req, res) => {
       name: row.name,
       avatar: row.avatar,
       startDate: row.start_date,
-      currentConsistencyLevel: row.current_consistency_level,
-      cleanWeeks: row.clean_weeks,
-      missedWeeks: row.missed_weeks,
-      totalPoints: row.total_points,
-      isActive: Boolean(row.is_active),
-      specialRules:
-        row.special_starting_level || row.reactivated_at_week
-          ? {
-              startingLevel: row.special_starting_level || undefined,
-              reactivatedAtWeek: row.reactivated_at_week || undefined,
-            }
-          : undefined,
+      priceLevel: Number(row.price_level),
+      cleanWeeks: Number(row.clean_weeks),
+      missedWeeks: Number(row.missed_weeks),
+      // Missing never removes you from the season.
+      isActive: true,
     };
 
     res.json(user);
@@ -358,15 +326,8 @@ app.get("/api/users/:id", async (req, res) => {
 });
 
 app.post("/api/users", async (req, res) => {
-  const {
-    name,
-    avatar,
-    currentConsistencyLevel,
-    cleanWeeks,
-    missedWeeks,
-    isActive,
-    specialRules,
-  } = req.body;
+  if (denyUnlessAdmin(req, res)) return;
+  const { name, avatar, priceLevel, cleanWeeks, missedWeeks } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
   if (nameError) {
@@ -382,8 +343,8 @@ app.post("/api/users", async (req, res) => {
     }
   }
 
-  if (currentConsistencyLevel !== undefined) {
-    const levelError = validateConsistencyLevel(currentConsistencyLevel);
+  if (priceLevel !== undefined) {
+    const levelError = validatePriceLevel(priceLevel);
     if (levelError) {
       res.status(400).json({ error: levelError });
       return;
@@ -406,21 +367,18 @@ app.post("/api/users", async (req, res) => {
     }
   }
 
-  if (specialRules?.startingLevel !== undefined) {
-    const startingLevelError = validateConsistencyLevel(
-      specialRules.startingLevel
-    );
-    if (startingLevelError) {
-      res
-        .status(400)
-        .json({ error: `Special starting level: ${startingLevelError}` });
-      return;
-    }
-  }
-
   try {
     const id = uuidv4();
-    const startDate = "2026-01-19";
+    // A player joins the season that exists, not a date pinned in the source.
+    const season = await db.get(
+      "SELECT challenge_start_date FROM admin_settings WHERE id = 1"
+    );
+    const startDate =
+      (typeof req.body.startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.body.startDate)
+        ? req.body.startDate
+        : null) ||
+      season?.challenge_start_date ||
+      new Date().toISOString().slice(0, 10);
     const sanitizedName = sanitizeString(name);
     const sanitizedAvatar = avatar
       ? sanitizeString(avatar)
@@ -428,20 +386,17 @@ app.post("/api/users", async (req, res) => {
 
     await db.run(
       `INSERT INTO users (
-        id, name, avatar, start_date, current_consistency_level,
-        clean_weeks, missed_weeks, total_points, is_active, special_starting_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, name, avatar, start_date, price_level,
+        clean_weeks, missed_weeks
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sanitizedName,
         sanitizedAvatar,
         startDate,
-        currentConsistencyLevel || 5,
+        priceLevel || 1,
         cleanWeeks || 0,
         missedWeeks || 0,
-        0,
-        isActive !== false ? 1 : 0,
-        specialRules?.startingLevel || null,
       ]
     );
 
@@ -452,14 +407,10 @@ app.post("/api/users", async (req, res) => {
       name: sanitizedName,
       avatar: sanitizedAvatar,
       startDate,
-      currentConsistencyLevel: currentConsistencyLevel || 5,
+      priceLevel: priceLevel || 1,
       cleanWeeks: cleanWeeks || 0,
       missedWeeks: missedWeeks || 0,
-      totalPoints: 0,
-      isActive: isActive !== false,
-      specialRules: specialRules?.startingLevel
-        ? { startingLevel: specialRules.startingLevel }
-        : undefined,
+      isActive: true,
     };
 
     res.status(201).json(user);
@@ -470,15 +421,13 @@ app.post("/api/users", async (req, res) => {
 });
 
 app.put("/api/users/:id", async (req, res) => {
+  if (denyUnlessAdmin(req, res)) return;
   const {
     name,
     avatar,
-    currentConsistencyLevel,
+    priceLevel,
     cleanWeeks,
     missedWeeks,
-    totalPoints,
-    isActive,
-    specialRules,
   } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
@@ -495,8 +444,8 @@ app.put("/api/users/:id", async (req, res) => {
     }
   }
 
-  if (currentConsistencyLevel !== undefined) {
-    const levelError = validateConsistencyLevel(currentConsistencyLevel);
+  if (priceLevel !== undefined) {
+    const levelError = validatePriceLevel(priceLevel);
     if (levelError) {
       res.status(400).json({ error: levelError });
       return;
@@ -519,43 +468,43 @@ app.put("/api/users/:id", async (req, res) => {
     }
   }
 
-  if (totalPoints !== undefined) {
-    const pointsError = validateNumber(totalPoints, "Total points", 0, 10000);
-    if (pointsError) {
-      res.status(400).json({ error: pointsError });
+  try {
+    // A partial update is the normal case — the client sends the fields it
+    // changed. Anything absent keeps the value already stored; passing the
+    // undefined straight through used to fail the whole request.
+    const existing = await db.get(
+      `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks
+         FROM users WHERE id = ?`,
+      [req.params.id]
+    );
+    if (!existing) {
+      res.status(404).json({ error: "User not found" });
       return;
     }
-  }
 
-  try {
     const sanitizedName = sanitizeString(name);
     const sanitizedAvatar = avatar
       ? sanitizeString(avatar)
-      : sanitizedName.charAt(0).toUpperCase();
+      : existing.avatar || sanitizedName.charAt(0).toUpperCase();
+    const nextPriceLevel = priceLevel ?? Number(existing.price_level);
+    const nextCleanWeeks = cleanWeeks ?? Number(existing.clean_weeks);
+    const nextMissedWeeks = missedWeeks ?? Number(existing.missed_weeks);
 
     const result = await db.run(
       `UPDATE users SET
         name = ?,
         avatar = ?,
-        current_consistency_level = ?,
+        price_level = ?,
         clean_weeks = ?,
         missed_weeks = ?,
-        total_points = ?,
-        is_active = ?,
-        special_starting_level = ?,
-        reactivated_at_week = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
         sanitizedName,
         sanitizedAvatar,
-        currentConsistencyLevel,
-        cleanWeeks,
-        missedWeeks,
-        totalPoints,
-        isActive ? 1 : 0,
-        specialRules?.startingLevel || null,
-        specialRules?.reactivatedAtWeek || null,
+        nextPriceLevel,
+        nextCleanWeeks,
+        nextMissedWeeks,
         req.params.id,
       ]
     );
@@ -571,19 +520,11 @@ app.put("/api/users/:id", async (req, res) => {
       id: req.params.id,
       name: sanitizedName,
       avatar: sanitizedAvatar,
-      startDate: "2026-01-19",
-      currentConsistencyLevel,
-      cleanWeeks,
-      missedWeeks,
-      totalPoints,
-      isActive,
-      specialRules:
-        specialRules?.startingLevel || specialRules?.reactivatedAtWeek
-          ? {
-              startingLevel: specialRules.startingLevel || undefined,
-              reactivatedAtWeek: specialRules.reactivatedAtWeek || undefined,
-            }
-          : undefined,
+      startDate: existing.start_date,
+      priceLevel: nextPriceLevel,
+      cleanWeeks: nextCleanWeeks,
+      missedWeeks: nextMissedWeeks,
+      isActive: true,
     };
 
     res.json(user);
@@ -594,6 +535,7 @@ app.put("/api/users/:id", async (req, res) => {
 });
 
 app.delete("/api/users/:id", async (req, res) => {
+  if (denyUnlessAdmin(req, res)) return;
   try {
     const result = await db.run("DELETE FROM users WHERE id = ?", [
       req.params.id,
@@ -629,6 +571,7 @@ app.get("/api/workouts", async (req, res) => {
       userName: row.user_name,
       week: row.week,
       dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
       date: row.date,
       isCompleted: Boolean(row.is_completed),
       workoutType: row.workout_type,
@@ -659,6 +602,7 @@ app.get("/api/workouts/user/:userId", async (req, res) => {
       userId: row.user_id,
       week: row.week,
       dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
       date: row.date,
       isCompleted: Boolean(row.is_completed),
       workoutType: row.workout_type,
@@ -677,130 +621,8 @@ app.get("/api/workouts/user/:userId", async (req, res) => {
   }
 });
 
-app.get("/api/workouts/:userId/:week", async (req, res) => {
-  try {
-    const rows = await db.all(
-      `SELECT * FROM workout_days
-      WHERE user_id = ? AND week = ?
-      ORDER BY day_of_week`,
-      [req.params.userId, req.params.week]
-    );
-
-    const workouts = rows.map((row) => ({
-      id: row.id,
-      userId: row.user_id,
-      week: row.week,
-      dayOfWeek: row.day_of_week,
-      date: row.date,
-      isCompleted: Boolean(row.is_completed),
-      workoutType: row.workout_type,
-      notes: row.notes,
-      markedBy: row.marked_by,
-      timestamp: row.timestamp,
-    }));
-
-    res.json(workouts);
-  } catch (err) {
-    console.error("Error fetching workouts:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/workouts", async (req, res) => {
-  const {
-    userId,
-    week,
-    dayOfWeek,
-    date,
-    isCompleted,
-    workoutType,
-    notes,
-    markedBy,
-  } = req.body;
-
-  if (!userId || !week || !dayOfWeek || !date) {
-    res.status(400).json({
-      error: "Missing required fields: userId, week, dayOfWeek, date",
-    });
-    return;
-  }
-
-  const validMarkedBy = ["user", "admin"].includes(markedBy)
-    ? markedBy
-    : "admin";
-
-  const timestamp = new Date().toISOString();
-
-  try {
-    const existingRow = await db.get(
-      `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`,
-      [userId, week, dayOfWeek]
-    );
-
-    const id = existingRow?.id || uuidv4();
-
-    await db.run(
-      `INSERT OR REPLACE INTO workout_days (
-        id, user_id, week, day_of_week, date, is_completed,
-        workout_type, notes, marked_by, timestamp
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        userId,
-        week,
-        dayOfWeek,
-        date,
-        isCompleted ? 1 : 0,
-        workoutType || null,
-        notes || null,
-        validMarkedBy,
-        timestamp,
-      ]
-    );
-
-    debug(
-      `Upserted workout for user ${userId}, week ${week}, day ${dayOfWeek}`
-    );
-
-    const workout = {
-      id,
-      userId,
-      week,
-      dayOfWeek,
-      date,
-      isCompleted,
-      workoutType: workoutType || null,
-      notes: notes || null,
-      markedBy: validMarkedBy,
-      timestamp,
-    };
-
-    res.json(workout);
-  } catch (err) {
-    console.error("Error upserting workout:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/workouts/:id", async (req, res) => {
-  try {
-    const result = await db.run("DELETE FROM workout_days WHERE id = ?", [
-      req.params.id,
-    ]);
-
-    if (result.changes === 0) {
-      res.status(404).json({ error: "Workout not found" });
-      return;
-    }
-
-    debug(`Deleted workout ID: ${req.params.id}`);
-    res.json({ message: "Workout deleted successfully" });
-  } catch (err) {
-    console.error("Error deleting workout:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Ahead of /:userId/:week, or Express reads "stats" as a user id and the
+// week as a uuid, and the endpoint quietly answers with an empty list.
 app.get("/api/workouts/stats/:userId", async (req, res) => {
   try {
     const row = await db.get(
@@ -832,6 +654,187 @@ app.get("/api/workouts/stats/:userId", async (req, res) => {
   }
 });
 
+app.get("/api/workouts/:userId/:week", async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT * FROM workout_days
+      WHERE user_id = ? AND week = ?
+      ORDER BY day_of_week`,
+      [req.params.userId, req.params.week]
+    );
+
+    const workouts = rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      week: row.week,
+      dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
+      date: row.date,
+      isCompleted: Boolean(row.is_completed),
+      workoutType: row.workout_type,
+      notes: row.notes,
+      markedBy: row.marked_by,
+      timestamp: row.timestamp,
+    }));
+
+    res.json(workouts);
+  } catch (err) {
+    console.error("Error fetching workouts:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/workouts", async (req, res) => {
+  const {
+    userId,
+    week,
+    dayOfWeek,
+    date,
+    isCompleted,
+    kind,
+    workoutType,
+    notes,
+    markedBy,
+  } = req.body;
+
+  if (denyUnlessOwner(req, res, userId)) return;
+
+  if (!userId || week == null || dayOfWeek == null || !date) {
+    res.status(400).json({
+      error: "Missing required fields: userId, week, dayOfWeek, date",
+    });
+    return;
+  }
+
+  const validMarkedBy = ["user", "admin"].includes(markedBy)
+    ? markedBy
+    : "admin";
+
+  // A session is a workout; 10k steps is half of one. An unrecognised kind is a
+  // mistake, not a session — silently promoting it would pay full credit for a
+  // walk. Absent is fine: rows written before steps existed are sessions.
+  const kinds = Object.keys(engine.CREDIT_BY_KIND);
+  if (kind != null && !kinds.includes(kind)) {
+    res.status(400).json({ error: `kind must be one of: ${kinds.join(", ")}` });
+    return;
+  }
+  const validKind = kind ?? "session";
+
+  const timestamp = new Date().toISOString();
+
+  const weekNum = Number(week);
+  const dayNum = Number(dayOfWeek);
+
+  try {
+    if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 7) {
+      res.status(400).json({ error: "dayOfWeek is 1-7, Monday to Sunday" });
+      return;
+    }
+    if (!Number.isInteger(weekNum) || weekNum < 1 || weekNum > engine.SEASON_WEEKS) {
+      res.status(400).json({ error: `Week is 1-${engine.SEASON_WEEKS}` });
+      return;
+    }
+    // You cannot have trained in a week that has not happened.
+    const currentWeek = await seasonCurrentWeek();
+    if (weekNum > currentWeek) {
+      res.status(400).json({
+        error: `Week ${weekNum} hasn't started — the season is on week ${currentWeek}`,
+      });
+      return;
+    }
+
+    const existingRow = await db.get(
+      `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`,
+      [userId, weekNum, dayNum]
+    );
+
+    const id = existingRow?.id || uuidv4();
+
+    await db.run(
+      `INSERT OR REPLACE INTO workout_days (
+        id, user_id, week, day_of_week, date, is_completed,
+        kind, workout_type, notes, marked_by, timestamp
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        userId,
+        weekNum,
+        dayNum,
+        date,
+        isCompleted ? 1 : 0,
+        validKind,
+        workoutType || null,
+        notes || null,
+        validMarkedBy,
+        timestamp,
+      ]
+    );
+
+    debug(
+      `Upserted workout for user ${userId}, week ${weekNum}, day ${dayNum}`
+    );
+
+    // The sheet just changed, so the fines on record may no longer match it — a
+    // week that became clean must stop being billed the moment it does, not the
+    // next time someone closes a week.
+    await syncFines(userId).catch((err) =>
+      console.error("Fine sync after workout write failed:", err.message)
+    );
+
+    const workout = {
+      id,
+      userId,
+      week: weekNum,
+      dayOfWeek: dayNum,
+      date,
+      isCompleted,
+      kind: validKind,
+      workoutType: workoutType || null,
+      notes: notes || null,
+      markedBy: validMarkedBy,
+      timestamp,
+    };
+
+    res.json(workout);
+  } catch (err) {
+    console.error("Error upserting workout:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/workouts/:id", async (req, res) => {
+  try {
+    // Deleting a day can turn a clean week into a missed one, so it is a write
+    // to that player's record and belongs to them alone.
+    const row = await db.get("SELECT user_id FROM workout_days WHERE id = ?", [req.params.id]);
+    if (!row) {
+      res.status(404).json({ error: "Workout not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, row.user_id)) return;
+
+    const result = await db.run("DELETE FROM workout_days WHERE id = ?", [
+      req.params.id,
+    ]);
+
+    if (result.changes === 0) {
+      res.status(404).json({ error: "Workout not found" });
+      return;
+    }
+
+    await syncFines(row.user_id).catch((err) =>
+      console.error("Fine sync after workout delete failed:", err.message)
+    );
+
+    debug(`Deleted workout ID: ${req.params.id}`);
+    res.json({ message: "Workout deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting workout:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ==================== GOALS ROUTES ====================
 
 app.get("/api/goals", async (req, res) => {
@@ -849,7 +852,11 @@ app.get("/api/goals", async (req, res) => {
       userName: row.user_name,
       category: row.category,
       description: row.description,
-      isDifficult: Boolean(row.is_difficult),
+      baseline: row.baseline,
+      target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -878,7 +885,11 @@ app.get("/api/goals/user/:userId", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      isDifficult: Boolean(row.is_difficult),
+      baseline: row.baseline,
+      target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -891,6 +902,41 @@ app.get("/api/goals/user/:userId", async (req, res) => {
     res.json(goals);
   } catch (err) {
     console.error("Error fetching user goals:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * The one shape a progress reading is reported in. Both the single-goal route
+ * and the batch route map through it, so they cannot drift apart.
+ */
+const progressRow = (r) => ({
+  id: r.id,
+  value: Number(r.value),
+  note: r.note,
+  recordedAt: r.recorded_at,
+});
+
+// Every goal's readings in one shot, keyed by goal id. Same arrays as
+// /api/goals/:id/progress, but one table read instead of one per goal — Turso
+// charges a round trip each. Registered above /api/goals/:id so Express doesn't
+// read "progress" as a goal id.
+//
+// ponytail: returns the whole table — a season of readings is a few hundred
+// rows. Take a ?userId= filter if that ever stops being true.
+app.get("/api/goals/progress", async (req, res) => {
+  try {
+    const rows = await db.all(
+      "SELECT id, goal_id, value, note, recorded_at FROM goal_progress ORDER BY recorded_at ASC, id ASC"
+    );
+    const byGoal = {};
+    for (const r of rows) {
+      const list = byGoal[r.goal_id];
+      if (list) list.push(progressRow(r));
+      else byGoal[r.goal_id] = [progressRow(r)];
+    }
+    res.json(byGoal);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -911,7 +957,11 @@ app.get("/api/goals/:id", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      isDifficult: Boolean(row.is_difficult),
+      baseline: row.baseline,
+      target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -926,9 +976,9 @@ app.get("/api/goals/:id", async (req, res) => {
 });
 
 app.post("/api/goals", async (req, res) => {
-  const { userId, category, description, isDifficult } = req.body;
+  const { userId, category, description, baseline, target, baselineValue, targetValue, unit } = req.body;
 
-  debug("Goal creation request:", { userId, category, description, isDifficult });
+  debug("Goal creation request:", { userId, category, description });
 
   if (!userId) {
     res.status(400).json({ error: "User ID is required" });
@@ -956,17 +1006,29 @@ app.post("/api/goals", async (req, res) => {
       return;
     }
 
-    if (isDifficult) {
-      const existing = await db.get(
-        "SELECT id FROM goals WHERE user_id = ? AND is_difficult = 1",
-        [userId]
-      );
-      if (existing) {
-        res.status(400).json({
-          error: "User already has a difficult goal. Only 1 difficult goal is allowed per person.",
-        });
-        return;
-      }
+    if (denyUnlessOwner(req, res, userId)) return;
+
+    // Rule 01 says a goal is measured by a number, and progress needs two of them:
+    // where you start and what counts as done.
+    const baseNum = Number(baselineValue);
+    const targetNum = Number(targetValue);
+    if (!Number.isFinite(baseNum) || !Number.isFinite(targetNum)) {
+      res.status(400).json({
+        error: "Give it a starting number and a target, so progress can be tracked.",
+      });
+      return;
+    }
+    if (baseNum === targetNum) {
+      res.status(400).json({ error: "Start and target can't be the same — there'd be nothing to chase." });
+      return;
+    }
+
+    // Rule 01: physical output, provable, measured by a number. The numbers above
+    // satisfy the last test, so they are what the check reads.
+    const eligibility = engine.goalEligibilityError(description, target ?? String(targetNum));
+    if (eligibility) {
+      res.status(400).json({ error: eligibility });
+      return;
     }
 
     const id = uuidv4();
@@ -975,15 +1037,20 @@ app.post("/api/goals", async (req, res) => {
 
     await db.run(
       `INSERT INTO goals (
-        id, user_id, category, description, is_difficult,
+        id, user_id, category, description, baseline, target,
+        baseline_value, target_value, unit,
         is_completed, completed_date, created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         userId,
         category,
         sanitizedDescription,
-        isDifficult ? 1 : 0,
+        baseline || null,
+        target || null,
+        Number.isFinite(Number(baselineValue)) ? Number(baselineValue) : null,
+        Number.isFinite(Number(targetValue)) ? Number(targetValue) : null,
+        unit ? String(unit).slice(0, 20) : null,
         0,
         null,
         createdDate,
@@ -997,7 +1064,11 @@ app.post("/api/goals", async (req, res) => {
       userId,
       category,
       description: sanitizedDescription,
-      isDifficult: isDifficult || false,
+      baseline: baseline || null,
+      target: target || null,
+      baselineValue: baseNum,
+      targetValue: targetNum,
+      unit: unit || null,
       isCompleted: false,
       completedDate: null,
       createdDate,
@@ -1006,11 +1077,7 @@ app.post("/api/goals", async (req, res) => {
 
     res.status(201).json(goal);
   } catch (err) {
-    if (err.message.includes("UNIQUE constraint failed")) {
-      res.status(409).json({
-        error: `User already has a goal in the ${category} category`,
-      });
-    } else if (err.message.includes("FOREIGN KEY constraint failed")) {
+    if (err.message.includes("FOREIGN KEY constraint failed")) {
       res.status(400).json({ error: `Invalid user ID: ${userId}` });
     } else {
       console.error("Error creating goal:", err.message);
@@ -1020,7 +1087,7 @@ app.post("/api/goals", async (req, res) => {
 });
 
 app.put("/api/goals/:id", async (req, res) => {
-  const { description, isDifficult, isCompleted } = req.body;
+  const { description, baseline, target, isCompleted } = req.body;
 
   const descriptionError = validateString(description, "Description", 3, 500);
   if (descriptionError) {
@@ -1029,39 +1096,65 @@ app.put("/api/goals/:id", async (req, res) => {
   }
 
   try {
-    if (isDifficult) {
-      const currentGoal = await db.get("SELECT user_id, is_difficult FROM goals WHERE id = ?", [req.params.id]);
-      if (currentGoal && !currentGoal.is_difficult) {
-        const existing = await db.get(
-          "SELECT id FROM goals WHERE user_id = ? AND is_difficult = 1 AND id != ?",
-          [currentGoal.user_id, req.params.id]
-        );
-        if (existing) {
-          res.status(400).json({
-            error: "User already has a difficult goal. Only 1 difficult goal is allowed per person.",
-          });
-          return;
-        }
-      }
+    const owner = await db.get(
+      "SELECT user_id, target_value, is_completed FROM goals WHERE id = ?",
+      [req.params.id]
+    );
+    if (!owner) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, owner.user_id)) return;
+
+    // Rule 11 gives the challenge title to the most goals completed AT TARGET.
+    // A goal with numbers is completed by a reading that reaches the target —
+    // POST /api/goals/:id/progress does that. This route is the only other way
+    // is_completed could move, so it refuses to move it, in either direction:
+    // hand-ticking would be a way to win by clicking, and hand-unticking would
+    // be a way to bank a second completion off the same target.
+    if (
+      isCompleted !== undefined &&
+      owner.target_value != null &&
+      Boolean(isCompleted) !== Boolean(owner.is_completed)
+    ) {
+      res.status(400).json({
+        error:
+          "This goal is measured. Log a reading that reaches the target — completion follows the numbers, not a tap.",
+      });
+      return;
+    }
+
+    const eligibility = engine.goalEligibilityError(description, target);
+    if (eligibility) {
+      res.status(400).json({ error: eligibility });
+      return;
     }
 
     const sanitizedDescription = sanitizeString(description);
-    const completedDate = isCompleted
-      ? new Date().toISOString().split("T")[0]
-      : null;
+
+    // null here means "leave completion alone". A measured goal always does —
+    // its readings own those two columns. A legacy goal only moves when the
+    // caller actually said so; leaving isCompleted out used to silently clear
+    // it, which was the same bypass by omission.
+    const nextCompleted =
+      owner.target_value != null || isCompleted === undefined ? null : isCompleted ? 1 : 0;
+    const completedDate = nextCompleted === 1 ? new Date().toISOString().split("T")[0] : null;
 
     const result = await db.run(
       `UPDATE goals SET
         description = ?,
-        is_difficult = ?,
-        is_completed = ?,
-        completed_date = ?,
+        baseline = COALESCE(?, baseline),
+        target = COALESCE(?, target),
+        is_completed = COALESCE(?, is_completed),
+        completed_date = CASE WHEN ? IS NULL THEN completed_date ELSE ? END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
         sanitizedDescription,
-        isDifficult ? 1 : 0,
-        isCompleted ? 1 : 0,
+        baseline ?? null,
+        target ?? null,
+        nextCompleted,
+        nextCompleted,
         completedDate,
         req.params.id,
       ]
@@ -1083,7 +1176,11 @@ app.put("/api/goals/:id", async (req, res) => {
       userId: row.user_id,
       category: row.category,
       description: row.description,
-      isDifficult: Boolean(row.is_difficult),
+      baseline: row.baseline,
+      target: row.target,
+      baselineValue: row.baseline_value != null ? Number(row.baseline_value) : undefined,
+      targetValue: row.target_value != null ? Number(row.target_value) : undefined,
+      unit: row.unit,
       isCompleted: Boolean(row.is_completed),
       completedDate: row.completed_date,
       createdDate: row.created_date,
@@ -1099,6 +1196,13 @@ app.put("/api/goals/:id", async (req, res) => {
 
 app.delete("/api/goals/:id", async (req, res) => {
   try {
+    const owner = await db.get("SELECT user_id FROM goals WHERE id = ?", [req.params.id]);
+    if (!owner) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, owner.user_id)) return;
+
     const result = await db.run("DELETE FROM goals WHERE id = ?", [
       req.params.id,
     ]);
@@ -1122,7 +1226,6 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
       `SELECT
         COUNT(*) as total_goals,
         SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_goals,
-        SUM(CASE WHEN is_difficult = 1 THEN 1 ELSE 0 END) as difficult_goals,
         COUNT(DISTINCT category) as categories_covered
       FROM goals
       WHERE user_id = ?`,
@@ -1132,7 +1235,6 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
     const stats = {
       totalGoals: row.total_goals || 0,
       completedGoals: row.completed_goals || 0,
-      difficultGoals: row.difficult_goals || 0,
       categoriesCovered: row.categories_covered || 0,
       completionRate:
         row.total_goals > 0
@@ -1147,197 +1249,646 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
   }
 });
 
-// ==================== WEEKLY PLANS ROUTES ====================
-
-const serializeWeeklyPlan = (row) => {
-  let committedDays = [];
-  try {
-    const parsed = JSON.parse(row.committed_days);
-    if (Array.isArray(parsed)) committedDays = parsed.map((d) => Number(d));
-  } catch (e) {
-    committedDays = [];
-  }
-  return {
-    id: row.id,
-    userId: row.user_id,
-    week: row.week,
-    committedDays,
-    committedAt: row.committed_at,
-    createdBy: row.created_by,
-  };
-};
-
-app.get("/api/weekly-plans", async (req, res) => {
-  try {
-    const rows = await db.all(
-      `SELECT * FROM weekly_plans ORDER BY week DESC, user_id`
-    );
-    const plans = rows.map(serializeWeeklyPlan);
-    debug(`Fetched ${plans.length} weekly plans`);
-    res.json(plans);
-  } catch (err) {
-    console.error("Error fetching weekly plans:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/weekly-plans/:userId/:week", async (req, res) => {
-  const userId = req.params.userId;
-  const week = Number(req.params.week);
-  if (!Number.isInteger(week) || week < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
-
+app.get("/api/settings", async (req, res) => {
   try {
     const row = await db.get(
-      `SELECT * FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, week]
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
     );
-
     if (!row) {
-      res.status(404).json({ error: "Weekly plan not found" });
+      res.status(404).json({ error: "Season not configured" });
       return;
     }
-
-    res.json(serializeWeeklyPlan(row));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/weekly-plans", async (req, res) => {
-  const { userId, week, committedDays, createdBy, override } = req.body;
-
-  if (!userId || typeof userId !== "string") {
-    res.status(400).json({ error: "userId is required" });
-    return;
-  }
-  const weekNum = Number(week);
-  if (!Number.isInteger(weekNum) || weekNum < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
-  if (!Array.isArray(committedDays) || committedDays.length === 0) {
-    res.status(400).json({ error: "committedDays must be a non-empty array" });
-    return;
-  }
-  const daysAsNumbers = committedDays.map((d) => Number(d));
-  for (const d of daysAsNumbers) {
-    if (!Number.isInteger(d) || d < 1 || d > 7) {
-      res
-        .status(400)
-        .json({ error: "committedDays must be integers in 1-7 (Mon-Sun)" });
-      return;
-    }
-  }
-  const uniqueDays = [...new Set(daysAsNumbers)];
-  if (uniqueDays.length !== daysAsNumbers.length) {
-    res.status(400).json({ error: "committedDays must be unique" });
-    return;
-  }
-  uniqueDays.sort((a, b) => a - b);
-  const validCreatedBy = ["user", "admin"].includes(createdBy)
-    ? createdBy
-    : "admin";
-  const isAdminOverride = validCreatedBy === "admin" && override === true;
-
-  try {
-    const user = await db.get(
-      `SELECT id, current_consistency_level, is_active FROM users WHERE id = ?`,
-      [userId]
-    );
-
-    if (!user) {
-      res.status(404).json({ error: `User ${userId} not found` });
-      return;
-    }
-    if (!user.is_active) {
-      res
-        .status(403)
-        .json({ error: "User is eliminated — cannot submit a plan" });
-      return;
-    }
-
-    const required = requiredWorkoutsForLevel(user.current_consistency_level);
-    if (uniqueDays.length < required) {
-      res.status(400).json({
-        error: `Level ${user.current_consistency_level} users must commit to at least ${required} days`,
-      });
-      return;
-    }
-
-    const currentWeek = getCurrentWeekIST();
-    if (!isAdminOverride && currentWeek > 0 && weekNum < currentWeek) {
-      res
-        .status(400)
-        .json({ error: "Cannot submit a plan for a past week" });
-      return;
-    }
-
-    if (!isAdminOverride && weekNum === currentWeek) {
-      res.status(403).json({
-        error:
-          "Commitment window closed — plans for this week had to be set by Sunday 23:59 IST of the prior week",
-        lockReason: "deadline-passed",
-      });
-      return;
-    }
-
-    const existing = await db.get(
-      `SELECT id, committed_at FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, weekNum]
-    );
-
-    const id = existing?.id || uuidv4();
-    const committedAt = existing?.committed_at || new Date().toISOString();
-
-    await db.run(
-      `INSERT OR REPLACE INTO weekly_plans (
-        id, user_id, week, committed_days, committed_at, created_by, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [id, userId, weekNum, JSON.stringify(uniqueDays), committedAt, validCreatedBy]
-    );
-
-    debug(
-      `Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
-    );
-
     res.json({
-      id,
-      userId,
-      week: weekNum,
-      committedDays: uniqueDays,
-      committedAt,
-      createdBy: validCreatedBy,
+      challengeStartDate: row.challenge_start_date,
+      challengeEndDate: row.challenge_end_date,
+      currentWeek: Number(row.current_week),
+      isActive: Boolean(row.is_active),
     });
   } catch (err) {
-    console.error("Error upserting weekly plan:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.delete("/api/weekly-plans/:userId/:week", async (req, res) => {
-  const userId = req.params.userId;
-  const week = Number(req.params.week);
-  if (!Number.isInteger(week) || week < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
+/**
+ * Move the season on.
+ *
+ * `current_week` is the season's clock: every fine and price level is
+ * replayed against it, and nothing was able to write it. Advancing closes the
+ * week that just ended, so the fines it produced are posted here — by the same
+ * `syncFines` the rest of the app uses, never by rule logic copied into a route.
+ *
+ * Going backwards is refused by default. Fines come from completed weeks, so a
+ * rewind silently un-bills people; `{"force": true}` says you meant it.
+ */
+app.put("/api/settings", async (req, res) => {
+  // Closing a week bills the whole group. Admin only.
+  if (denyUnlessAdmin(req, res)) return;
 
   try {
-    const result = await db.run(
-      `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, week]
+    const current = await db.get(
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
     );
-
-    if (result.changes === 0) {
-      res.status(404).json({ error: "Weekly plan not found" });
+    if (!current) {
+      res.status(404).json({ error: "Season not configured" });
       return;
     }
 
-    debug(`Deleted weekly plan for user ${userId}, week ${week}`);
-    res.json({ message: "Weekly plan deleted" });
+    const { currentWeek, challengeStartDate, challengeEndDate, isActive, force } = req.body ?? {};
+    const from = Number(current.current_week);
+    const sets = [];
+    const params = [];
+    let to = from;
+
+    if (currentWeek !== undefined) {
+      to = Number(currentWeek);
+      if (!Number.isInteger(to) || to < 1 || to > engine.SEASON_WEEKS) {
+        res.status(400).json({ error: `currentWeek must be a whole number from 1 to ${engine.SEASON_WEEKS}` });
+        return;
+      }
+      if (to < from && force !== true) {
+        res.status(409).json({
+          error:
+            `Refusing to move the season back from week ${from} to week ${to}. Fines are derived from ` +
+            `completed weeks, so rewinding un-bills people. Send {"force": true} to do it anyway.`,
+        });
+        return;
+      }
+      sets.push("current_week = ?");
+      params.push(to);
+    }
+
+    for (const [value, column] of [
+      [challengeStartDate, "challenge_start_date"],
+      [challengeEndDate, "challenge_end_date"],
+    ]) {
+      if (value === undefined) continue;
+      if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        res.status(400).json({ error: `${column} must be a YYYY-MM-DD date` });
+        return;
+      }
+      sets.push(`${column} = ?`);
+      params.push(value);
+    }
+
+    if (isActive !== undefined) {
+      sets.push("is_active = ?");
+      params.push(isActive ? 1 : 0);
+    }
+
+    if (sets.length === 0) {
+      res.status(400).json({ error: "Nothing to update" });
+      return;
+    }
+
+    await db.run(`UPDATE admin_settings SET ${sets.join(", ")} WHERE id = 1`, params);
+
+    // The week that just closed is now scoreable, so bill it. syncFines also
+    // voids anything the move stopped being a miss, which is what makes a forced
+    // rewind honest rather than just cheap.
+    const results = [];
+    if (to !== from) {
+      try {
+        const players = await db.all("SELECT id, name FROM users");
+        for (const player of players) {
+          const { issued, voided } = await syncFines(player.id);
+          if (issued.length || voided.length) {
+            results.push({ userId: player.id, name: player.name, issued, voided });
+          }
+        }
+      } catch (err) {
+        // The clock and the fines have to move together. There is no transaction
+        // to lean on here, so put the week back rather than leave a season that
+        // says week N but was never billed for week N-1.
+        // ponytail: compensating write, not a transaction — good enough for one row.
+        await db.run("UPDATE admin_settings SET current_week = ? WHERE id = 1", [from]);
+        res.status(500).json({ error: `Fine sync failed, season left at week ${from}: ${err.message}` });
+        return;
+      }
+    }
+
+    const row = await db.get(
+      "SELECT challenge_start_date, challenge_end_date, current_week, is_active FROM admin_settings WHERE id = 1"
+    );
+    const finesIssued = results.reduce((n, r) => n + r.issued.length, 0);
+    const finesVoided = results.reduce((n, r) => n + r.voided.length, 0);
+    debug(`Season week ${from} -> ${to}: issued ${finesIssued}, voided ${finesVoided} fine(s)`);
+
+    res.json({
+      challengeStartDate: row.challenge_start_date,
+      challengeEndDate: row.challenge_end_date,
+      currentWeek: Number(row.current_week),
+      isActive: Boolean(row.is_active),
+      movedFrom: from,
+      movedTo: Number(row.current_week),
+      finesIssued,
+      finesVoided,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GOAL PROGRESS ====================
+
+/**
+ * How far along a goal is, as a fraction of the distance from baseline to target.
+ *
+ * Direction is inferred: a target below the baseline means lower is better (a 5k
+ * time), otherwise higher is better (a lift). Returns null when the goal has no
+ * numbers to measure against.
+ */
+// The rules engine owns this — the UI draws its bar from the same function, so
+// the server and the board cannot disagree about what "at target" means.
+const progressFraction = engine.goalProgressFraction;
+
+app.get("/api/goals/:id/progress", async (req, res) => {
+  try {
+    const rows = await db.all(
+      "SELECT id, value, note, recorded_at FROM goal_progress WHERE goal_id = ? ORDER BY recorded_at ASC, id ASC",
+      [req.params.id]
+    );
+    res.json(rows.map(progressRow));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Progress is appended, never overwritten — the history is the evidence Rule 01 asks for.
+app.post("/api/goals/:id/progress", async (req, res) => {
+  try {
+    const { value, note } = req.body;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      res.status(400).json({ error: "Progress needs a number" });
+      return;
+    }
+    if (numeric < 0) {
+      res.status(400).json({ error: "Progress can't be negative" });
+      return;
+    }
+
+    const goal = await db.get(
+      "SELECT id, user_id, baseline_value, target_value, unit, is_completed FROM goals WHERE id = ?",
+      [req.params.id]
+    );
+    if (!goal) {
+      res.status(404).json({ error: "Goal not found" });
+      return;
+    }
+
+    if (denyUnlessOwner(req, res, goal.user_id)) return;
+
+    const baseline = goal.baseline_value != null ? Number(goal.baseline_value) : null;
+    const target = goal.target_value != null ? Number(goal.target_value) : null;
+
+    // Ten goal-ranges away from the baseline is a typo, not a reading. Measured
+    // as a fraction of baseline -> target, so it holds whichever way the goal
+    // runs: a lift rises, a 5k time falls.
+    if (baseline != null && target != null && target !== baseline) {
+      if (Math.abs((numeric - baseline) / (target - baseline)) > 10) {
+        res.status(400).json({
+          error: `${numeric} ${goal.unit || ""}`.trim() + " is nowhere near this goal — check the number",
+        });
+        return;
+      }
+    }
+
+    const recordedAt = new Date().toISOString();
+    await db.run(
+      "INSERT INTO goal_progress (id, goal_id, user_id, value, note, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [uuidv4(), req.params.id, goal.user_id, numeric, note ? String(note).slice(0, 200) : null, recordedAt]
+    );
+
+    // Hitting the target completes the goal. Nothing else changes here.
+    const fraction = progressFraction(baseline, target, numeric);
+    const reached = fraction === 1;
+    if (reached && !goal.is_completed) {
+      await db.run("UPDATE goals SET is_completed = 1, completed_date = ? WHERE id = ?", [
+        recordedAt.split("T")[0],
+        req.params.id,
+      ]);
+    }
+
+    res.status(201).json({ value: numeric, recordedAt, progress: fraction, completed: reached });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GROUP FEED ====================
+
+/**
+ * What has happened in the season, newest first.
+ *
+ * Assembled from the records themselves rather than a written-to event log, so
+ * the feed can never claim something the data doesn't support.
+ */
+app.get("/api/feed", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 40, 100);
+    const [users, fines, goals, progress] = await Promise.all([
+      db.all("SELECT id, name, avatar FROM users"),
+      db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines WHERE voided_at IS NULL"),
+      db.all("SELECT id, user_id, description, completed_date FROM goals WHERE is_completed = 1"),
+      db.all(
+        `SELECT p.user_id, p.value, p.recorded_at, g.description, g.unit, g.baseline_value, g.target_value
+         FROM goal_progress p JOIN goals g ON g.id = p.goal_id
+         ORDER BY p.recorded_at DESC LIMIT 60`
+      ),
+    ]);
+
+    const nameOf = new Map(users.map((u) => [u.id, u.name]));
+    const events = [];
+
+    for (const f of fines) {
+      events.push({
+        kind: "fine",
+        userId: f.user_id,
+        name: nameOf.get(f.user_id),
+        at: f.issued_at,
+        text: `missed week ${f.week} — ₹${Number(f.amount).toLocaleString("en-IN")}`,
+        amount: Number(f.amount),
+      });
+      if (f.settled_at) {
+        events.push({
+          kind: "payment",
+          userId: f.user_id,
+          name: nameOf.get(f.user_id),
+          at: f.settled_at,
+          text: `paid ₹${Number(f.amount).toLocaleString("en-IN")} for week ${f.week}`,
+          amount: Number(f.amount),
+        });
+      }
+    }
+
+    for (const g of goals) {
+      events.push({
+        kind: "goal",
+        userId: g.user_id,
+        name: nameOf.get(g.user_id),
+        at: g.completed_date ? `${g.completed_date}T12:00:00.000Z` : null,
+        text: `completed "${g.description}"`,
+      });
+    }
+
+    for (const p of progress) {
+      const fraction = progressFraction(
+        p.baseline_value != null ? Number(p.baseline_value) : null,
+        p.target_value != null ? Number(p.target_value) : null,
+        Number(p.value)
+      );
+      events.push({
+        kind: "progress",
+        userId: p.user_id,
+        name: nameOf.get(p.user_id),
+        at: p.recorded_at,
+        text: `logged ${p.value}${p.unit ? ` ${p.unit}` : ""} on "${p.description}"`,
+        progress: fraction,
+      });
+    }
+
+    const ordered = events
+      .filter((e) => e.at && e.name)
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, limit);
+
+    res.json(ordered);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== SEASON & FINES ====================
+
+/**
+ * Everything the season engine needs about one player, read from the raw record.
+ * Fines are derived, never trusted from a stored column — the sheet is the truth.
+ */
+/**
+ * Which season week a player's first one is.
+ *
+ * Someone who joins in week 11 owes nothing for the ten weeks they were not in.
+ * Their start date against the season's start date is the only record of that.
+ */
+function joinedAtWeek(playerStart, seasonStart) {
+  if (!playerStart || !seasonStart) return 1;
+  const days = (Date.parse(playerStart) - Date.parse(seasonStart)) / 86400000;
+  if (!Number.isFinite(days) || days <= 0) return 1;
+  return Math.floor(days / 7) + 1;
+}
+
+async function loadSeason(userId) {
+  const [workoutRows, fineRows, settings, player] = await Promise.all([
+    db.all(
+      "SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days WHERE user_id = ?",
+      [userId]
+    ),
+    db.all("SELECT week, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL", [userId]),
+    db.get("SELECT current_week, challenge_start_date FROM admin_settings WHERE id = 1"),
+    db.get("SELECT start_date FROM users WHERE id = ?", [userId]),
+  ]);
+
+  const currentWeek = settings ? Number(settings.current_week) : 1;
+
+  const workoutDays = workoutRows.map((r) => ({
+    userId: r.user_id,
+    week: Number(r.week),
+    dayOfWeek: Number(r.day_of_week),
+    kind: r.kind || "session",
+    isCompleted: Boolean(r.is_completed),
+  }));
+
+  const state = engine.runSeason({
+    userId,
+    workoutDays,
+    settledWeeks: fineRows.filter((r) => r.settled_at).map((r) => Number(r.week)),
+    completedWeeks: Math.max(0, currentWeek - 1),
+    fromWeek: joinedAtWeek(player?.start_date, settings?.challenge_start_date),
+  });
+
+  return { state, currentWeek, workoutRows };
+}
+
+/**
+ * Write the derived fines to the fines table so they can be settled and shown.
+ * Idempotent: replaying the season never double-charges a week.
+ */
+async function syncFines(userId) {
+  const { state } = await loadSeason(userId);
+  const existing = await db.all(
+    "SELECT id, week, amount, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL",
+    [userId]
+  );
+  const known = new Set(existing.map((r) => Number(r.week)));
+
+  // A week that is no longer a miss — logged late, say — must
+  // stop being billed. Otherwise the fines list demands money the season doesn't.
+  const stillFined = new Map(state.weeks.filter((w) => w.fine > 0).map((w) => [w.week, w.fine]));
+  const voided = [];
+  for (const row of existing) {
+    const week = Number(row.week);
+    const owedNow = stillFined.get(week);
+
+    if (owedNow == null) {
+      await db.run(
+        "UPDATE fines SET voided_at = ?, voided_reason = ? WHERE id = ?",
+        [
+          new Date().toISOString(),
+          row.settled_at ? "week no longer fined — paid in credit" : "week no longer fined",
+          row.id,
+        ]
+      );
+      voided.push({ week, amount: Number(row.amount), wasSettled: Boolean(row.settled_at) });
+      known.delete(week);
+    } else if (Number(row.amount) !== owedNow && !row.settled_at) {
+      // The price of that week can change when earlier weeks are edited — and the
+      // level moves with the amount, or the row reports ₹400 at level 1.
+      const level = state.weeks.find((w) => w.week === week)?.priceLevel ?? 1;
+      await db.run("UPDATE fines SET amount = ?, price_level = ? WHERE id = ?", [
+        owedNow,
+        level,
+        row.id,
+      ]);
+    }
+  }
+
+  const issued = [];
+  for (const week of state.weeks) {
+    if (week.fine <= 0 || known.has(week.week)) continue;
+    const now = new Date();
+    const due = new Date(now.getTime() + PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
+    // One row per player-week, forever (UNIQUE(user_id, week)). A week that was
+    // voided and then became a miss again — the season moved back and forward,
+    // or a logged day was undone — has to revive that row, not insert a second.
+    await db.run(
+      `INSERT INTO fines (id, user_id, week, amount, price_level, issued_at, due_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, week) DO UPDATE SET
+         amount = excluded.amount,
+         price_level = excluded.price_level,
+         issued_at = excluded.issued_at,
+         due_at = excluded.due_at,
+         voided_at = NULL,
+         voided_reason = NULL`,
+      [uuidv4(), userId, week.week, week.fine, week.priceLevel, now.toISOString(), due.toISOString()]
+    );
+    issued.push({ week: week.week, amount: week.fine });
+  }
+
+  // Keep the player row in step with what the replay says.
+  await db.run(
+    "UPDATE users SET price_level = ?, clean_weeks = ?, missed_weeks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [state.priceLevel, state.cleanWeeks, state.missedWeeks, userId]
+  );
+
+  return { issued, voided, state };
+}
+
+/**
+ * The one shape a season is reported in. Both the single-player route and the
+ * batch route build their response here, so they cannot drift apart.
+ */
+function seasonView(user, { state, currentWeek, workoutRows }, unsettled) {
+  return {
+    userId: user.id,
+    name: user.name,
+    currentWeek,
+    priceLevel: state.priceLevel,
+    fineIfMissed: engine.currentFine(state),
+    cleanWeeks: state.cleanWeeks,
+    missedWeeks: state.missedWeeks,
+    cleanStreak: state.cleanStreak,
+    missesAtLevel: state.missesAtLevel,
+    billed: state.billed,
+    paid: state.paid,
+    outstanding: state.outstanding,
+    potEligible: state.potEligible,
+    weeks: state.weeks,
+    // Not scored yet — the week is still running.
+    currentWeekProgress: {
+      week: currentWeek,
+      // Credit, not a count: a session is 1 and 10k steps is a half.
+      credits: workoutRows
+        .filter((r) => Number(r.week) === currentWeek && Boolean(r.is_completed))
+        .reduce(
+          (sum, r) => sum + (engine.CREDIT_BY_KIND[r.kind] ?? engine.CREDIT_BY_KIND.session),
+          0
+        ),
+      needed: engine.WORKOUTS_PER_WEEK,
+    },
+    unsettledFines: unsettled.map((f) => ({
+      id: f.id,
+      week: Number(f.week),
+      amount: Number(f.amount),
+      issuedAt: f.issued_at,
+      dueAt: f.due_at,
+      overdue: new Date(f.due_at) < new Date(),
+    })),
+  };
+}
+
+const groupByUser = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const list = map.get(row.user_id);
+    if (list) list.push(row);
+    else map.set(row.user_id, [row]);
+  }
+  return map;
+};
+
+// Every player's season in one shot. Same objects as /api/season/:userId, but
+// five table reads instead of five per player — Turso charges a round trip each.
+app.get("/api/seasons", async (req, res) => {
+  try {
+    const [users, workoutRows, fineRows, settings] = await Promise.all([
+      db.all("SELECT id, name, start_date FROM users ORDER BY name COLLATE NOCASE ASC"),
+      db.all("SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days"),
+      db.all(
+        `SELECT user_id, id, week, amount, settled_at, issued_at, due_at
+         FROM fines WHERE voided_at IS NULL ORDER BY week DESC`
+      ),
+      db.get("SELECT current_week, challenge_start_date FROM admin_settings WHERE id = 1"),
+    ]);
+
+    const currentWeek = settings ? Number(settings.current_week) : 1;
+    const completedWeeks = Math.max(0, currentWeek - 1);
+    const workoutsByUser = groupByUser(workoutRows);
+    const finesByUser = groupByUser(fineRows);
+
+    res.json(
+      users.map((user) => {
+        const mine = workoutsByUser.get(user.id) || [];
+        const fines = finesByUser.get(user.id) || [];
+
+        const state = engine.runSeason({
+          userId: user.id,
+          workoutDays: mine.map((r) => ({
+            userId: r.user_id,
+            week: Number(r.week),
+            dayOfWeek: Number(r.day_of_week),
+            kind: r.kind || "session",
+            isCompleted: Boolean(r.is_completed),
+          })),
+          settledWeeks: fines.filter((r) => r.settled_at).map((r) => Number(r.week)),
+          completedWeeks,
+          fromWeek: joinedAtWeek(user.start_date, settings?.challenge_start_date),
+        });
+
+        return seasonView(
+          user,
+          { state, currentWeek, workoutRows: mine },
+          fines.filter((f) => !f.settled_at)
+        );
+      })
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Full derived state for one player: what a miss costs, what they owe, where they stand.
+app.get("/api/season/:userId", async (req, res) => {
+  try {
+    const user = await db.get("SELECT id, name FROM users WHERE id = ?", [req.params.userId]);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const season = await loadSeason(req.params.userId);
+    const unsettled = await db.all(
+      `SELECT id, week, amount, issued_at, due_at FROM fines
+       WHERE user_id = ? AND settled_at IS NULL AND voided_at IS NULL ORDER BY week DESC`,
+      [req.params.userId]
+    );
+
+    res.json(seasonView(user, season, unsettled));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The app posts fines itself. Nobody has to notice a missed week by hand.
+app.post("/api/fines/sync", async (req, res) => {
+  // Posting fines bills real money. Admin only, like closing a week.
+  if (denyUnlessAdmin(req, res)) return;
+  try {
+    const userIds = req.body.userId
+      ? [req.body.userId]
+      : (await db.all("SELECT id FROM users")).map((r) => r.id);
+
+    const results = [];
+    for (const userId of userIds) {
+      const { issued, voided, state } = await syncFines(userId);
+      results.push({ userId, issued, voided, outstanding: state.outstanding });
+    }
+
+    const total = results.reduce((n, r) => n + r.issued.length, 0);
+    const retired = results.reduce((n, r) => n + r.voided.length, 0);
+    debug(`Fine sync issued ${total} and voided ${retired} across ${userIds.length} player(s)`);
+    res.json({ players: results.length, finesIssued: total, finesVoided: retired, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/fines", async (req, res) => {
+  try {
+    const { userId, unsettled } = req.query;
+    const clauses = [];
+    const params = [];
+    if (userId) {
+      clauses.push("user_id = ?");
+      params.push(userId);
+    }
+    if (unsettled === "true") clauses.push("settled_at IS NULL");
+    clauses.push("voided_at IS NULL");
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
+    const rows = await db.all(
+      `SELECT id, user_id, week, amount, price_level, issued_at, due_at, settled_at
+       FROM fines ${where} ORDER BY week DESC`,
+      params
+    );
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        userId: r.user_id,
+        week: Number(r.week),
+        amount: Number(r.amount),
+        priceLevel: Number(r.price_level),
+        issuedAt: r.issued_at,
+        dueAt: r.due_at,
+        settledAt: r.settled_at,
+        overdue: !r.settled_at && new Date(r.due_at) < new Date(),
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Settling clears the balance, and with it the pot eligibility it was blocking.
+app.post("/api/fines/:id/settle", async (req, res) => {
+  try {
+    const fine = await db.get("SELECT id, user_id, settled_at FROM fines WHERE id = ?", [req.params.id]);
+    if (!fine) {
+      res.status(404).json({ error: "Fine not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, fine.user_id)) return;
+    if (fine.settled_at) {
+      res.status(409).json({ error: "Fine already settled" });
+      return;
+    }
+
+    await db.run("UPDATE fines SET settled_at = ? WHERE id = ?", [new Date().toISOString(), req.params.id]);
+    const { state } = await syncFines(fine.user_id);
+
+    res.json({ message: "Fine settled", outstanding: state.outstanding });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1348,7 +1899,7 @@ app.delete("/api/weekly-plans/:userId/:week", async (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
-    message: "FitBois 2.0 API is running",
+    message: "FitBros 3.0 API is running",
     database: process.env.TURSO_DATABASE_URL ? "Turso" : "SQLite (local)",
     environment: isProduction ? "production" : "development",
     timestamp: new Date().toISOString(),
