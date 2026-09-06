@@ -7,10 +7,6 @@ export interface User {
   priceLevel: 1 | 2 | 3;
   cleanWeeks: number;
   missedWeeks: number;
-  /** The hour this player's day rolls over, locked at Week 0. */
-  cutoffHour: number;
-  /** 1 = Monday … 7 = Sunday. Locked at Week 0. */
-  weekEndDay: number;
   /** Nothing takes a player out of the season any more. */
   isActive: boolean;
 

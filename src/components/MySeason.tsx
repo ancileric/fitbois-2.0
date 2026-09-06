@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { User, WorkoutDay, WorkoutKind } from "../types";
 import { apiFetch } from "../services/http";
-import { CREDIT_BY_KIND, SEASON_WEEKS } from "../utils/seasonEngine";
+import { CREDIT_BY_KIND, SEASON_WEEKS, WEEK_ENDS_ON } from "../utils/seasonEngine";
 
 /**
  * The home screen, written for one person: your week first, your money second,
@@ -246,10 +246,9 @@ const MySeason: React.FC<MySeasonProps> = ({
     );
   }
 
-  // 1 = Monday … 7 = Sunday, matching the week-end day locked at Week 0.
+  // 1 = Monday … 7 = Sunday. One week shape for the whole group.
   const todayDow = ((new Date().getDay() + 6) % 7) + 1;
-  const weekEndDay = currentUser?.weekEndDay ?? 7;
-  const daysLeft = Math.max(0, weekEndDay - todayDow + 1);
+  const daysLeft = Math.max(0, WEEK_ENDS_ON - todayDow + 1);
   const done = me?.currentWeekProgress.credits ?? 0;
   const needed = me?.currentWeekProgress.needed ?? 5;
   const left = Math.max(0, needed - done);

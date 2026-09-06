@@ -200,8 +200,8 @@ async function seed() {
 
   for (const player of PLAYERS) {
     await db.run(
-      `INSERT INTO users (id, name, avatar, start_date, price_level, cutoff_hour, week_end_day)
-       VALUES (?, ?, ?, ?, 1, 22, 7)`,
+      `INSERT INTO users (id, name, avatar, start_date, price_level)
+       VALUES (?, ?, ?, ?, 1)`,
       [player.id, player.name, player.avatar, "2026-01-19"]
     );
 

@@ -284,7 +284,7 @@ app.get("/api/users", async (req, res) => {
       SELECT
         id, name, avatar, start_date, price_level,
         clean_weeks, missed_weeks,
-        cutoff_hour, week_end_day, created_at, updated_at
+        created_at, updated_at
       FROM users
       ORDER BY name COLLATE NOCASE ASC
     `);
@@ -297,8 +297,6 @@ app.get("/api/users", async (req, res) => {
       priceLevel: Number(row.price_level),
       cleanWeeks: Number(row.clean_weeks),
       missedWeeks: Number(row.missed_weeks),
-      cutoffHour: Number(row.cutoff_hour),
-      weekEndDay: Number(row.week_end_day),
       // Missing never removes you from the season.
       isActive: true,
     }));
@@ -317,7 +315,7 @@ app.get("/api/users/:id", async (req, res) => {
       `SELECT
         id, name, avatar, start_date, price_level,
         clean_weeks, missed_weeks,
-        cutoff_hour, week_end_day, created_at, updated_at
+        created_at, updated_at
       FROM users WHERE id = ?`,
       [req.params.id]
     );
@@ -335,8 +333,6 @@ app.get("/api/users/:id", async (req, res) => {
       priceLevel: Number(row.price_level),
       cleanWeeks: Number(row.clean_weeks),
       missedWeeks: Number(row.missed_weeks),
-      cutoffHour: Number(row.cutoff_hour),
-      weekEndDay: Number(row.week_end_day),
       // Missing never removes you from the season.
       isActive: true,
     };
@@ -350,7 +346,7 @@ app.get("/api/users/:id", async (req, res) => {
 
 app.post("/api/users", async (req, res) => {
   if (denyUnlessAdmin(req, res)) return;
-  const { name, avatar, priceLevel, cleanWeeks, missedWeeks, cutoffHour, weekEndDay } = req.body;
+  const { name, avatar, priceLevel, cleanWeeks, missedWeeks } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
   if (nameError) {
@@ -410,8 +406,8 @@ app.post("/api/users", async (req, res) => {
     await db.run(
       `INSERT INTO users (
         id, name, avatar, start_date, price_level,
-        clean_weeks, missed_weeks, cutoff_hour, week_end_day
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        clean_weeks, missed_weeks
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sanitizedName,
@@ -420,8 +416,6 @@ app.post("/api/users", async (req, res) => {
         priceLevel || 1,
         cleanWeeks || 0,
         missedWeeks || 0,
-        cutoffHour ?? 0,
-        weekEndDay ?? 7,
       ]
     );
 
@@ -453,8 +447,6 @@ app.put("/api/users/:id", async (req, res) => {
     priceLevel,
     cleanWeeks,
     missedWeeks,
-    cutoffHour,
-    weekEndDay,
   } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
@@ -501,7 +493,6 @@ app.put("/api/users/:id", async (req, res) => {
     // undefined straight through used to fail the whole request.
     const existing = await db.get(
       `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks,
-              cutoff_hour, week_end_day
          FROM users WHERE id = ?`,
       [req.params.id]
     );
@@ -517,8 +508,6 @@ app.put("/api/users/:id", async (req, res) => {
     const nextPriceLevel = priceLevel ?? Number(existing.price_level);
     const nextCleanWeeks = cleanWeeks ?? Number(existing.clean_weeks);
     const nextMissedWeeks = missedWeeks ?? Number(existing.missed_weeks);
-    const nextCutoffHour = cutoffHour ?? Number(existing.cutoff_hour);
-    const nextWeekEndDay = weekEndDay ?? Number(existing.week_end_day);
 
     const result = await db.run(
       `UPDATE users SET
@@ -527,8 +516,6 @@ app.put("/api/users/:id", async (req, res) => {
         price_level = ?,
         clean_weeks = ?,
         missed_weeks = ?,
-        cutoff_hour = ?,
-        week_end_day = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
@@ -537,8 +524,6 @@ app.put("/api/users/:id", async (req, res) => {
         nextPriceLevel,
         nextCleanWeeks,
         nextMissedWeeks,
-        nextCutoffHour,
-        nextWeekEndDay,
         req.params.id,
       ]
     );
@@ -558,8 +543,6 @@ app.put("/api/users/:id", async (req, res) => {
       priceLevel: nextPriceLevel,
       cleanWeeks: nextCleanWeeks,
       missedWeeks: nextMissedWeeks,
-      cutoffHour: nextCutoffHour,
-      weekEndDay: nextWeekEndDay,
       isActive: true,
     };
 

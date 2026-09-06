@@ -56,6 +56,10 @@ export const WORKOUTS_PER_WEEK: 5;
 export const CREDIT_BY_KIND: Record<WorkoutKind, number>;
 /** The season is 24 weeks long. Nothing can be logged outside it. */
 export const SEASON_WEEKS: 24;
+/** The week runs Monday to Monday: 1 = Monday … 7 = Sunday. */
+export const WEEK_ENDS_ON: 7;
+/** A day rolls over at midnight, for everyone. */
+export const DAY_ROLLS_OVER_AT: 0;
 /** What the first miss costs. Every level after it doubles. */
 export const FINE_BASE: 200;
 /** How long a fine has to be paid. Nothing is taken away when it passes. */

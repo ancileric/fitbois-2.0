@@ -76,12 +76,10 @@ const Admin: React.FC<AdminProps> = ({
       name: newUser.name,
       avatar: newUser.avatar || newUser.name.charAt(0).toUpperCase(),
       startDate: adminSettings.challengeStartDate,
-      // Everyone opens at the cheapest price, active, on the group's default clock.
+      // Everyone opens at the cheapest price, on the one clock the season runs on.
       priceLevel: 1,
       cleanWeeks: newUser.cleanWeeks,
       missedWeeks: newUser.missedWeeks,
-      cutoffHour: 0,
-      weekEndDay: 7,
       isActive: newUser.isActive,
     };
 

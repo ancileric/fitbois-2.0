@@ -14,6 +14,8 @@ const DDL = `
     clean_weeks INTEGER NOT NULL DEFAULT 0,
     missed_weeks INTEGER NOT NULL DEFAULT 0,
     standing TEXT NOT NULL DEFAULT 'active', -- vestigial: nothing derives from it
+    -- vestigial: the season runs one clock (Monday to Monday, midnight rollover),
+    -- stated by the engine. Kept so an existing database is untouched.
     cutoff_hour INTEGER NOT NULL DEFAULT 0,
     week_end_day INTEGER NOT NULL DEFAULT 7,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

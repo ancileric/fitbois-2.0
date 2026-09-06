@@ -30,6 +30,17 @@ const DEFAULT_KIND = 'session';
 /** The season is 24 weeks long. Nothing can be logged outside it. */
 const SEASON_WEEKS = 24;
 
+/**
+ * One clock for everyone: the week runs Monday to Monday, and a day rolls over
+ * at midnight.
+ *
+ * These used to be per-player settings locked at Week 0. Nobody ever set them,
+ * nothing enforced the cutoff, and a season where two people disagree about
+ * when Sunday ends is a season with two sets of books.
+ */
+const WEEK_ENDS_ON = 7; // 1 = Monday … 7 = Sunday
+const DAY_ROLLS_OVER_AT = 0; // midnight, on a 24-hour clock
+
 /** What the first miss costs. Every level after it doubles. */
 const FINE_BASE = 200;
 
@@ -208,6 +219,8 @@ module.exports = {
   WORKOUTS_PER_WEEK,
   CREDIT_BY_KIND,
   SEASON_WEEKS,
+  WEEK_ENDS_ON,
+  DAY_ROLLS_OVER_AT,
   FINE_BASE,
   PAYMENT_GRACE_HOURS,
   fineAtLevel,
