@@ -9,6 +9,8 @@ interface HeaderProps {
   users: User[];
   currentUser: User | null;
   onChangePlayer: (id: string) => void;
+  /** Only the season admin sees the way in — the server enforces the rest. */
+  isAdmin: boolean;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -17,6 +19,7 @@ const Header: React.FC<HeaderProps> = ({
   users,
   currentUser,
   onChangePlayer,
+  isAdmin,
 }) => {
   const { choice, cycle } = useTheme();
 
@@ -64,6 +67,7 @@ const Header: React.FC<HeaderProps> = ({
             </nav>
 
             <div className="flex items-center gap-2">
+              {isAdmin ? (
               <button
                 onClick={() => onViewChange("admin")}
                 title="Admin"
@@ -76,6 +80,7 @@ const Header: React.FC<HeaderProps> = ({
               >
                 <Settings size={16} aria-hidden="true" />
               </button>
+              ) : null}
               <button
                 onClick={cycle}
                 title={themeLabel}
@@ -140,7 +145,7 @@ const Header: React.FC<HeaderProps> = ({
         className="fixed bottom-0 left-0 right-0 bg-paper/92 backdrop-blur-xl border-t border-line md:hidden z-50 pb-safe"
       >
         <div className="flex">
-          {[...navItems, { id: "admin", label: "Admin" } as const].map((item) => {
+          {[...navItems, ...(isAdmin ? [{ id: "admin", label: "Admin" } as const] : [])].map((item) => {
             const isActive = activeView === item.id;
             return (
               <button

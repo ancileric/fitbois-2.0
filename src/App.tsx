@@ -12,7 +12,7 @@ import OfflineBanner from "./components/OfflineBanner";
 import { ToastProvider, useToast } from "./components/ToastContext";
 import Toast from "./components/Toast";
 import { apiService } from "./services/api";
-import { apiFetch } from "./services/http";
+import { apiFetch, isAdmin } from "./services/http";
 
 // All four view components are code-split so only the chunk for the active
 // view is downloaded on initial load.
@@ -92,10 +92,12 @@ function AppContent() {
     const seeded = initialSnapshot?.users ?? [];
     return seeded.find((u) => u.id === remembered) ?? seeded[0] ?? null;
   });
+  const admin = isAdmin();
   const [activeView, setActiveView] = useState<ActiveView>(
     () => {
       // A view name saved by an older build must not leave the page blank.
       const saved = localStorage.getItem("activeView");
+      if (saved === "admin" && !isAdmin()) return "me";
       return saved === "me" || saved === "group" || saved === "rules" || saved === "admin"
         ? saved
         : "me";
@@ -508,6 +510,7 @@ function AppContent() {
       <Header
         activeView={activeView}
         onViewChange={setActiveView}
+        isAdmin={admin}
         users={users}
         currentUser={currentUser}
         onChangePlayer={(id) => {
@@ -548,7 +551,7 @@ function AppContent() {
 
             {activeView === "rules" && <Rules />}
 
-            {activeView === "admin" && (
+            {activeView === "admin" && admin && (
               <Admin
                 users={users}
                 workoutDays={workoutDays}

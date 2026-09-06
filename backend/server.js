@@ -260,6 +260,27 @@ const actorOf = (req) => req.header("x-player-id") || req.body?.actorId || null;
 const isAdminRequest = (req) =>
   Boolean(process.env.ADMIN_KEY) && req.header("x-admin-key") === process.env.ADMIN_KEY;
 
+let warnedNoAdminKey = false;
+
+/**
+ * The admin seat is one shared secret, not a login: whoever holds ADMIN_KEY can
+ * add or remove players and close a week. With no key configured — local work —
+ * the routes stay open, because locking the only admin out of a development
+ * database helps nobody. Production sets the key.
+ */
+function denyUnlessAdmin(req, res) {
+  if (isAdminRequest(req)) return false;
+  if (!process.env.ADMIN_KEY) {
+    if (!warnedNoAdminKey) {
+      warnedNoAdminKey = true;
+      console.warn("⚠️  ADMIN_KEY is not set — admin routes are open. Set it in production.");
+    }
+    return false;
+  }
+  res.status(403).json({ error: "Admin only. This one belongs to whoever runs the season." });
+  return true;
+}
+
 /** Rejects the request unless the caller owns `ownerId` (or is an admin). */
 function denyUnlessOwner(req, res, ownerId) {
   if (isAdminRequest(req)) return false;
@@ -364,6 +385,7 @@ app.get("/api/users/:id", async (req, res) => {
 });
 
 app.post("/api/users", async (req, res) => {
+  if (denyUnlessAdmin(req, res)) return;
   const { name, avatar, priceLevel, cleanWeeks, missedWeeks, cutoffHour, weekEndDay } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
@@ -462,6 +484,7 @@ app.post("/api/users", async (req, res) => {
 });
 
 app.put("/api/users/:id", async (req, res) => {
+  if (denyUnlessAdmin(req, res)) return;
   const {
     name,
     avatar,
@@ -593,6 +616,7 @@ app.put("/api/users/:id", async (req, res) => {
 });
 
 app.delete("/api/users/:id", async (req, res) => {
+  if (denyUnlessAdmin(req, res)) return;
   try {
     const result = await db.run("DELETE FROM users WHERE id = ?", [
       req.params.id,
@@ -1768,13 +1792,8 @@ app.get("/api/settings", async (req, res) => {
  * rewind silently un-bills people; `{"force": true}` says you meant it.
  */
 app.put("/api/settings", async (req, res) => {
-  // Closing a week bills the whole group, so the caller has to say who they are.
-  // Rule 12 leaves the admin seats unassigned, so any player may still do it —
-  // this is the seam a real admin check slots into.
-  if (!isAdminRequest(req) && !actorOf(req)) {
-    res.status(401).json({ error: "Say who you are: send an x-player-id header" });
-    return;
-  }
+  // Closing a week bills the whole group. Admin only.
+  if (denyUnlessAdmin(req, res)) return;
 
   try {
     const current = await db.get(

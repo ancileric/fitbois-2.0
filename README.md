@@ -99,17 +99,33 @@ other branch gets a preview URL.
 |---|---|
 | `TURSO_DATABASE_URL` | `turso db show <name> --url` |
 | `TURSO_AUTH_TOKEN` | `turso db tokens create <name>` |
-| `ADMIN_KEY` | optional; any secret. Set it and `x-admin-key` bypasses the ownership checks. |
+| `ADMIN_KEY` | **set this.** Any long random string — it is the admin seat (see below). |
 
 A serverless function has no disk, so the local SQLite file is not an option in
 production — Turso is required. The schema creates itself on the first request
 after a cold start, including the column migrations for a database that predates
 3.0, so there is no separate migration step.
 
-**One caveat before sharing the link:** there is no authentication. `x-player-id`
-is a header the client sets and the "Playing as" picker changes it, so anyone
-with the link can act as anyone. That is fine for a private group and not fine
-for a public URL.
+### Who is admin
+
+There is no login. Players identify themselves with `x-player-id`, which the
+"Playing as" picker sets — fine inside a group of friends, since the worst a
+player can do is edit their own record.
+
+The admin seat is a shared secret instead. Set `ADMIN_KEY` in the Vercel
+environment, then open the app **once** as:
+
+    https://<your-app>/?admin=<the key>
+
+The key is stored on that device, stripped from the URL, and sent as
+`x-admin-key` on every request afterwards. `?admin=` with nothing after it
+forgets it again. Only a device holding the key sees the Admin tab, and — the
+part that matters — only it can add, edit or remove players or close a week.
+Everyone else gets a 403 from the server, whatever their browser thinks.
+
+With no `ADMIN_KEY` set at all, the admin routes stay open. That is deliberate
+for local work and wrong for production, so set the variable before you share
+the link.
 
 ## API Endpoints
 
