@@ -75,9 +75,9 @@ const PLAYERS = [
       ["Run 5k every week", "cardio", true, 0, 10, "runs"],
       ["20 pull-ups in a set", "strength", true, 8, 20, "reps"],
       ["Cycle 200km total", "endurance", false, 0, 200, "km"],
-      ["Yoga 30 sessions", "mobility", false],
-      ["Plank 3 minutes", "core", false],
-      ["Climb 20 routes", "sports", false],
+      ["Yoga 30 sessions", "mobility", false, 0, 30, "sessions"],
+      ["Plank 3 minutes", "core", false, 60, 180, "sec"],
+      ["Climb 20 routes", "sports", false, 0, 20, "routes"],
     ],
   },
   {
@@ -88,9 +88,9 @@ const PLAYERS = [
     weeks: [...Array(7).fill(CLEAN), MISS, MISS, MISS],
     pays: "all",
     goals: [
-      ["Squat bodyweight x10", "strength", true, 4, 10, "reps"],
+      ["Squat 10 reps at 75kg", "strength", true, 4, 10, "reps"],
       ["Sub-25 minute 5k", "cardio", true, 31, 25, "min"],
-      ["Box 12 sessions", "sports", true],
+      ["Box 12 sessions", "sports", true, 0, 12, "sessions"],
     ],
   },
   {
@@ -102,9 +102,9 @@ const PLAYERS = [
     pays: "all",
     goals: [
       ["Muscle-up unassisted", "strength", false, 0, 1, "reps"],
-      ["Walk 10k steps daily", "consistency", false],
-      ["Stretch every morning", "mobility", false],
-      ["Badminton 20 games", "sports", false],
+      ["Walk 10k steps daily", "consistency", false, 0, 90, "days"],
+      ["Stretch 60 sessions", "mobility", false, 0, 60, "sessions"],
+      ["Badminton 20 games", "sports", false, 0, 20, "games"],
     ],
   },
   {
@@ -117,8 +117,8 @@ const PLAYERS = [
     goals: [
       ["Row 2km under 8 minutes", "cardio", true, 9.5, 8, "min"],
       ["Overhead press 50kg", "strength", false, 35, 50, "kg"],
-      ["Football 25 games", "sports", false],
-      ["Sleep-free rest days logged", "consistency", false],
+      ["Football 25 games", "sports", false, 0, 25, "games"],
+      ["Row 5km under 20 minutes", "consistency", false, 24, 20, "min"],
     ],
   },
   {
@@ -129,11 +129,11 @@ const PLAYERS = [
     weeks: [MISS, CLEAN, MISS, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN],
     pays: "none",
     goals: [
-      ["Cycle to work 40 times", "consistency", false],
-      ["Hike 5 trails", "endurance", false],
-      ["Push-ups 100 in a day", "strength", false],
-      ["Table tennis 15 games", "sports", false],
-      ["Cold plunge 20 times", "recovery", false],
+      ["Cycle to work 40 times", "consistency", false, 0, 40, "rides"],
+      ["Hike 5 trails", "endurance", false, 0, 5, "trails"],
+      ["Push-ups 100 in a day", "strength", false, 30, 100, "reps"],
+      ["Table tennis 15 games", "sports", false, 0, 15, "games"],
+      ["Cold plunge 20 times", "recovery", false, 0, 20, "plunges"],
     ],
   },
   {
@@ -145,7 +145,7 @@ const PLAYERS = [
     pays: "all",
     goals: [
       ["Lead climb 6b", "sports", false, 0, 6, "grade"],
-      ["Hangboard 3x a week", "strength", false],
+      ["Hangboard 3x a week", "strength", false, 0, 36, "sessions"],
     ],
   },
   {
@@ -157,7 +157,7 @@ const PLAYERS = [
     pays: [4],
     goals: [
       ["Swim 100 lengths", "endurance", false, 20, 100, "lengths"],
-      ["Bench bodyweight", "strength", false],
+      ["Bench 70kg for 5", "strength", false, 45, 70, "kg"],
     ],
   },
 ];
@@ -173,7 +173,31 @@ const workoutRowsFor = (player) => {
   return rows;
 };
 
+/**
+ * The seed must not write a season the API would refuse to create.
+ *
+ * Every fixture goes through the same eligibility check `POST /api/goals` runs,
+ * and must carry the numbers the form now demands. A fixture that fails is a
+ * broken seed, not a warning.
+ */
+function checkGoalFixtures() {
+  const bad = [];
+  for (const player of PLAYERS) {
+    for (const [description, , , baseline, target, unit] of player.goals) {
+      const reason = engine.goalEligibilityError(description, target != null ? String(target) : "");
+      if (reason) bad.push(`${player.name}: "${description}" — ${reason}`);
+      else if (baseline == null || target == null || !unit) {
+        bad.push(`${player.name}: "${description}" — needs a baseline, a target and a unit`);
+      }
+    }
+  }
+  if (bad.length) {
+    throw new Error(`Seed fixtures the API would reject:\n  ${bad.join("\n  ")}`);
+  }
+}
+
 async function seed() {
+  checkGoalFixtures();
   await db.execMultiple(DDL);
   for (const sql of MIGRATIONS) {
     try {
