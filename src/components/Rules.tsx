@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { ALL_RULES, RULE_STAGES } from "../data/rules";
-import { FINE_BY_LEVEL, MAX_SKIP_TOKENS, SEASON_WEEKS, WORKOUTS_PER_WEEK } from "../utils/seasonEngine";
+import { fineAtLevel, MAX_SKIP_TOKENS, SEASON_WEEKS, WORKOUTS_PER_WEEK } from "../utils/seasonEngine";
 
 /**
  * The rules, in the app, so nobody has to go looking for the document.
@@ -16,7 +16,8 @@ const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 /** The handful of numbers people ask about, straight from the engine. */
 const HEADLINES: [string, string][] = [
   ["A clean week", `${WORKOUTS_PER_WEEK} workouts`],
-  ["A missed week", `${rupees(FINE_BY_LEVEL[1])} → ${rupees(FINE_BY_LEVEL[3])}`],
+  ["10k steps", "half a workout"],
+  ["A missed week", `from ${rupees(fineAtLevel(1))}, doubling`],
   ["Skip tokens", `${MAX_SKIP_TOKENS} a season`],
   ["Season", `${SEASON_WEEKS} weeks`],
 ];
@@ -61,7 +62,7 @@ const Rules: React.FC = () => {
           What the group agreed before Week 0. Four stages, in the order the season runs.
         </p>
 
-        <dl className="grid grid-cols-2 sm:grid-cols-4 border-t border-line mt-5 sm:divide-x divide-line">
+        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border-t border-line mt-5 sm:divide-x divide-line">
           {HEADLINES.map(([label, value]) => (
             <div key={label} className="py-4 pr-4 sm:px-4 sm:first:pl-0 border-b border-line">
               <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">{label}</dt>

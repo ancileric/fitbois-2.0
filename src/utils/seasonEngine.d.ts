@@ -1,4 +1,4 @@
-import { WorkoutDay } from '../types';
+import { WorkoutDay, WorkoutKind } from '../types';
 
 /**
  * Types for the shared season engine (seasonEngine.js).
@@ -7,14 +7,16 @@ import { WorkoutDay } from '../types';
  * same file — one set of rules, no drift between UI and API.
  */
 
-export type PriceLevel = 1 | 2 | 3;
+/** The ladder has no ceiling: every two misses doubles the price. */
+export type PriceLevel = number;
 export type Standing = 'active' | 'suspended' | 'out';
 export type WeekOutcome = 'clean' | 'missed' | 'skipped';
 
 export interface WeekResult {
   week: number;
   outcome: WeekOutcome;
-  workouts: number;
+  /** Sessions at 1, step days at a half. */
+  credits: number;
   /** The price level this week was judged at. */
   priceLevel: PriceLevel;
   /** Amount fined for this week, 0 when clean or covered by a token. */
@@ -55,14 +57,18 @@ export interface SeasonInput {
   completedWeeks: number;
 }
 
-/** A clean week is 5 workouts. Flat for everyone, every week. */
+/** A clean week is 5 workouts' worth of credit. Flat for everyone, every week. */
 export const WORKOUTS_PER_WEEK: 5;
+/** What a logged day is worth: a session 1, 10k steps a half. */
+export const CREDIT_BY_KIND: Record<WorkoutKind, number>;
 /** The season is 24 weeks long. Nothing can be logged outside it. */
 export const SEASON_WEEKS: 24;
-/** The ladder sets what a miss costs. Everyone starts at level 1. */
-export const FINE_BY_LEVEL: Record<PriceLevel, number>;
-/** Misses at one price before it rises; clean weeks in a row before it falls. */
-export const WEEKS_TO_MOVE: 3;
+/** What the first miss costs. Every level after it doubles. */
+export const FINE_BASE: 200;
+/** What a miss costs at a level: 200, 400, 800, 1600 … */
+export function fineAtLevel(level: number): number;
+/** Misses at one price before it doubles; clean weeks in a row before it halves. */
+export const WEEKS_TO_MOVE: 2;
 export const MAX_SKIP_TOKENS: 3;
 export const MAX_CONSECUTIVE_TOKENS: 2;
 /** Hours a fine may go unpaid before the player is suspended. */

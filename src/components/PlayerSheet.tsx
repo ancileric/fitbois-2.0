@@ -25,11 +25,14 @@ interface Season {
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; workouts: number; fine: number }[];
-  currentWeekProgress: { week: number; workouts: number; needed: number };
+  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  currentWeekProgress: { week: number; credits: number; needed: number };
 }
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+/** Credit reads as 3 or 3.5, never 3.0. */
+const credit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 const OUTCOME_STYLE = {
   clean: "bg-clean-500",
@@ -129,7 +132,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
               {season.weeks.map((w) => (
                 <div
                   key={w.week}
-                  title={`Week ${w.week}: ${w.workouts} workouts${w.fine ? ` — ${rupees(w.fine)}` : ""}`}
+                  title={`Week ${w.week}: ${credit(w.credits)} workouts${w.fine ? ` — ${rupees(w.fine)}` : ""}`}
                   className={`h-7 flex-1 rounded-md ${OUTCOME_STYLE[w.outcome]}`}
                 />
               ))}

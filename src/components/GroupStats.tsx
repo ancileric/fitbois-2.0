@@ -17,7 +17,7 @@ import { apiFetch, latestGoalReadings } from "../services/http";
 interface WeekCell {
   week: number;
   outcome: "clean" | "missed" | "skipped";
-  workouts: number;
+  credits: number;
   fine: number;
 }
 

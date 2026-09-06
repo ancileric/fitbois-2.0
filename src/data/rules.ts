@@ -143,12 +143,17 @@ export const RULE_STAGES: RuleStage[] = [
         "id": "r5",
         "number": "05",
         "title": "Logging",
-        "summary": "One shared sheet, logged before your own cutoff.",
+        "summary": "One shared sheet. A session is a workout, 10k steps is half.",
         "paragraphs": [
           "One sheet, single source of truth. A session counts if logged before your cutoff on the day you did it. Hevy, Strava, Apple Watch, Google Fit, timestamped photo — all accepted.",
+          "Whatever you send counts as a workout. A 10k-step day counts as half of one, so two of them make a workout — and since a day is logged once, a week can never be walked clean.",
           "Your cutoff and week-end day come from Week 0, and the sheet is what the fine in Rule 07 is read off."
         ],
-        "points": [],
+        "points": [
+          "A session — anything you would call training — is 1",
+          "A 10k-step day is ½, so two make a workout",
+          "5 a week is clean, however you get there"
+        ],
         "table": [],
         "ties": [
           "r3",
@@ -179,31 +184,33 @@ export const RULE_STAGES: RuleStage[] = [
   {
     "name": "When you miss",
     "span": "Rules 07–10",
-    "blurb": "A missed week costs money, the price rises if it keeps happening, and not paying is worse than missing.",
+    "blurb": "A missed week costs money, the price doubles if it keeps happening, and not paying is worse than missing.",
     "rules": [
       {
         "id": "r7",
         "number": "07",
         "title": "Fines",
-        "summary": "₹500, ₹1,000, ₹2,000 — miss repeatedly and the price goes up.",
-        "paragraphs": [],
+        "summary": "₹200 to start. Two strikes at a price, then it doubles.",
+        "paragraphs": [
+          "A miss costs ₹200. Two missed weeks at one price and the price doubles — and it keeps doubling, with no ceiling. Two clean weeks in a row halve it again."
+        ],
         "points": [
-          "3 missed weeks at one price → the price goes up a level",
-          "3 clean weeks in a row → the price drops back down",
+          "2 missed weeks at one price → the price doubles",
+          "2 clean weeks in a row → the price halves back down",
           "Charged on your own clock, paid within 48 hours"
         ],
         "table": [
           [
-            "Level 1",
-            "₹500"
+            "First two misses",
+            "₹200"
           ],
           [
-            "Level 2",
-            "₹1,000"
+            "Next two",
+            "₹400"
           ],
           [
-            "Level 3",
-            "₹2,000"
+            "Then",
+            "₹800, ₹1,600, ₹3,200 …"
           ]
         ],
         "ties": [

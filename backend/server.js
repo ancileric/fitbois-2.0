@@ -57,7 +57,7 @@ let initPromise = null;
 async function runDatabaseInit() {
   console.log("🚀 Initializing database...");
 
-  const { DDL, INDEXES } = require("./schema");
+  const { DDL, INDEXES, MIGRATIONS } = require("./schema");
   const ddl = DDL;
 
   // libsql/client supports executeMultiple for batched multi-statement SQL
@@ -80,28 +80,7 @@ async function runDatabaseInit() {
 
   // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
   // CREATE TABLE IF NOT EXISTS won't add columns to a table that already exists.
-  const addColumns = [
-    // A database that predates FitBros 3.0 has the tables but not these columns,
-    // and CREATE TABLE IF NOT EXISTS will not add them. Duplicates are ignored
-    // below, so this is safe to run against a fresh database too.
-    "ALTER TABLE users ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN standing TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE users ADD COLUMN cutoff_hour INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN week_end_day INTEGER NOT NULL DEFAULT 7",
-    "ALTER TABLE goals ADD COLUMN points INTEGER NOT NULL DEFAULT 1",
-    "ALTER TABLE goals ADD COLUMN approved_at TEXT",
-    "ALTER TABLE fines ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
-    "ALTER TABLE fines ADD COLUMN issued_at TEXT",
-    "ALTER TABLE fines ADD COLUMN due_at TEXT",
-    "ALTER TABLE fines ADD COLUMN settled_at TEXT",
-    "ALTER TABLE fines ADD COLUMN waived_by_token_id TEXT",
-    "ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE goals ADD COLUMN baseline_value REAL",
-    "ALTER TABLE goals ADD COLUMN target_value REAL",
-    "ALTER TABLE goals ADD COLUMN unit TEXT",
-    "ALTER TABLE fines ADD COLUMN voided_at TEXT",
-    "ALTER TABLE fines ADD COLUMN voided_reason TEXT",
-  ];
+  const addColumns = MIGRATIONS;
   for (const sql of addColumns) {
     try {
       await db.exec(sql);
@@ -652,6 +631,7 @@ app.get("/api/workouts", async (req, res) => {
       userName: row.user_name,
       week: row.week,
       dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
       date: row.date,
       isCompleted: Boolean(row.is_completed),
       workoutType: row.workout_type,
@@ -682,6 +662,7 @@ app.get("/api/workouts/user/:userId", async (req, res) => {
       userId: row.user_id,
       week: row.week,
       dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
       date: row.date,
       isCompleted: Boolean(row.is_completed),
       workoutType: row.workout_type,
@@ -747,6 +728,7 @@ app.get("/api/workouts/:userId/:week", async (req, res) => {
       userId: row.user_id,
       week: row.week,
       dayOfWeek: row.day_of_week,
+      kind: row.kind || "session",
       date: row.date,
       isCompleted: Boolean(row.is_completed),
       workoutType: row.workout_type,
@@ -769,6 +751,7 @@ app.post("/api/workouts", async (req, res) => {
     dayOfWeek,
     date,
     isCompleted,
+    kind,
     workoutType,
     notes,
     markedBy,
@@ -786,6 +769,9 @@ app.post("/api/workouts", async (req, res) => {
   const validMarkedBy = ["user", "admin"].includes(markedBy)
     ? markedBy
     : "admin";
+
+  // A session is a workout; 10k steps is half of one. Anything else is a session.
+  const validKind = Object.keys(engine.CREDIT_BY_KIND).includes(kind) ? kind : "session";
 
   const timestamp = new Date().toISOString();
 
@@ -822,8 +808,8 @@ app.post("/api/workouts", async (req, res) => {
     await db.run(
       `INSERT OR REPLACE INTO workout_days (
         id, user_id, week, day_of_week, date, is_completed,
-        workout_type, notes, marked_by, timestamp
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        kind, workout_type, notes, marked_by, timestamp
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         userId,
@@ -831,6 +817,7 @@ app.post("/api/workouts", async (req, res) => {
         dayNum,
         date,
         isCompleted ? 1 : 0,
+        validKind,
         workoutType || null,
         notes || null,
         validMarkedBy,
@@ -849,6 +836,7 @@ app.post("/api/workouts", async (req, res) => {
       dayOfWeek: dayNum,
       date,
       isCompleted,
+      kind: validKind,
       workoutType: workoutType || null,
       notes: notes || null,
       markedBy: validMarkedBy,
@@ -2091,7 +2079,7 @@ app.get("/api/feed", async (req, res) => {
 async function loadSeason(userId) {
   const [workoutRows, tokenRows, fineRows, settings] = await Promise.all([
     db.all(
-      "SELECT user_id, week, day_of_week, is_completed FROM workout_days WHERE user_id = ?",
+      "SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days WHERE user_id = ?",
       [userId]
     ),
     db.all("SELECT week FROM skip_tokens WHERE user_id = ? AND approved_at IS NOT NULL", [userId]),
@@ -2105,6 +2093,7 @@ async function loadSeason(userId) {
     userId: r.user_id,
     week: Number(r.week),
     dayOfWeek: Number(r.day_of_week),
+    kind: r.kind || "session",
     isCompleted: Boolean(r.is_completed),
   }));
 
@@ -2215,9 +2204,13 @@ function seasonView(user, { state, currentWeek, workoutRows }, unsettled) {
     // Not scored yet — the week is still running.
     currentWeekProgress: {
       week: currentWeek,
-      workouts: workoutRows.filter(
-        (r) => Number(r.week) === currentWeek && Boolean(r.is_completed)
-      ).length,
+      // Credit, not a count: a session is 1 and 10k steps is a half.
+      credits: workoutRows
+        .filter((r) => Number(r.week) === currentWeek && Boolean(r.is_completed))
+        .reduce(
+          (sum, r) => sum + (engine.CREDIT_BY_KIND[r.kind] ?? engine.CREDIT_BY_KIND.session),
+          0
+        ),
       needed: engine.WORKOUTS_PER_WEEK,
     },
     unsettledFines: unsettled.map((f) => ({
@@ -2247,7 +2240,7 @@ app.get("/api/seasons", async (req, res) => {
   try {
     const [users, workoutRows, tokenRows, fineRows, settings] = await Promise.all([
       db.all("SELECT id, name FROM users ORDER BY name COLLATE NOCASE ASC"),
-      db.all("SELECT user_id, week, day_of_week, is_completed FROM workout_days"),
+      db.all("SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days"),
       db.all("SELECT user_id, week FROM skip_tokens WHERE approved_at IS NOT NULL"),
       db.all(
         `SELECT user_id, id, week, amount, settled_at, issued_at, due_at
@@ -2273,6 +2266,8 @@ app.get("/api/seasons", async (req, res) => {
             userId: r.user_id,
             week: Number(r.week),
             dayOfWeek: Number(r.day_of_week),
+            kind: r.kind || "session",
+    kind: r.kind || "session",
             isCompleted: Boolean(r.is_completed),
           })),
           skipWeeks: (tokensByUser.get(user.id) || []).map((r) => Number(r.week)),

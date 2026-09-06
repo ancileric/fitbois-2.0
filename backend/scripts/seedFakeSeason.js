@@ -19,13 +19,15 @@ if (process.env.TURSO_DATABASE_URL && process.env.SEED_FORCE !== "1") {
 }
 
 const db = require("../db");
-const { DDL } = require("../schema");
+const { DDL, INDEXES, MIGRATIONS } = require("../schema");
 const engine = require("../../src/utils/seasonEngine");
 const { v4: uuidv4 } = require("uuid");
 
 const WEEKS_PLAYED = 10;
 const CLEAN = 5; // a clean week
 const MISS = 2; // short of the 5 needed
+/** [sessions, stepDays] — 3 sessions and 4 walks is 3 + 2 = 5 credits, still clean. */
+const WALKED = [3, 4];
 
 /**
  * weeks   — workouts logged per week
@@ -83,7 +85,7 @@ const PLAYERS = [
     id: "vikram",
     name: "Vikram",
     avatar: "🥊",
-    note: "three misses, all paid — price climbed to ₹1,000",
+    note: "three misses, all paid — price doubled to ₹400",
     weeks: [...Array(7).fill(CLEAN), MISS, MISS, MISS],
     skips: [],
     pays: "all",
@@ -97,7 +99,7 @@ const PLAYERS = [
     id: "neha",
     name: "Neha",
     avatar: "🤸‍♀️",
-    note: "six misses paid — at the ₹2,000 ceiling",
+    note: "six misses paid — the ladder is up at ₹800",
     weeks: [MISS, MISS, MISS, MISS, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN],
     skips: [],
     pays: "all",
@@ -112,8 +114,8 @@ const PLAYERS = [
     id: "imran",
     name: "Imran",
     avatar: "⛹️",
-    note: "climbed, then three clean weeks brought the price back down",
-    weeks: [MISS, MISS, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN],
+    note: "climbed, then clean weeks halved the price back to ₹200",
+    weeks: [MISS, MISS, MISS, CLEAN, CLEAN, WALKED, CLEAN, WALKED, CLEAN, CLEAN],
     skips: [],
     pays: "all",
     goals: [
@@ -156,8 +158,8 @@ const PLAYERS = [
     id: "kabir",
     name: "Kabir",
     avatar: "🏊",
-    note: "one week skipped, one fine paid, one still due",
-    weeks: [CLEAN, MISS, CLEAN, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, MISS],
+    note: "one week skipped, one fine paid, one still due — and two walked weeks",
+    weeks: [CLEAN, MISS, WALKED, MISS, CLEAN, WALKED, CLEAN, CLEAN, CLEAN, MISS],
     skips: [2],
     pays: [4],
     goals: [
@@ -169,16 +171,25 @@ const PLAYERS = [
 
 const workoutRowsFor = (player) => {
   const rows = [];
-  player.weeks.forEach((count, i) => {
-    for (let day = 1; day <= count; day++) {
-      rows.push({ week: i + 1, dayOfWeek: day });
-    }
+  player.weeks.forEach((entry, i) => {
+    const [sessions, steps] = Array.isArray(entry) ? entry : [entry, 0];
+    let day = 1;
+    for (let d = 0; d < sessions; d++) rows.push({ week: i + 1, dayOfWeek: day++, kind: "session" });
+    for (let d = 0; d < steps; d++) rows.push({ week: i + 1, dayOfWeek: day++, kind: "steps" });
   });
   return rows;
 };
 
 async function seed() {
   await db.execMultiple(DDL);
+  for (const sql of MIGRATIONS) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      if (!String(err.message).includes("duplicate column")) throw err;
+    }
+  }
+  await db.execMultiple(INDEXES);
 
   for (const table of ["goal_progress", "fines", "skip_tokens", "workout_days", "goals", "users"]) {
     await db.run(`DELETE FROM ${table}`);
@@ -204,9 +215,17 @@ async function seed() {
     const workouts = workoutRowsFor(player);
     for (const row of workouts) {
       await db.run(
-        `INSERT INTO workout_days (id, user_id, week, day_of_week, date, is_completed, workout_type, marked_by, timestamp)
-         VALUES (?, ?, ?, ?, ?, 1, 'gym', 'user', ?)`,
-        [uuidv4(), player.id, row.week, row.dayOfWeek, `2026-W${row.week}-${row.dayOfWeek}`, new Date().toISOString()]
+        `INSERT INTO workout_days (id, user_id, week, day_of_week, date, is_completed, kind, workout_type, marked_by, timestamp)
+         VALUES (?, ?, ?, ?, ?, 1, ?, 'gym', 'user', ?)`,
+        [
+          uuidv4(),
+          player.id,
+          row.week,
+          row.dayOfWeek,
+          `2026-W${row.week}-${row.dayOfWeek}`,
+          row.kind,
+          new Date().toISOString(),
+        ]
       );
     }
 
@@ -308,7 +327,7 @@ async function seed() {
       name: player.name,
       note: player.note,
       standing: state.standing,
-      price: engine.FINE_BY_LEVEL[state.priceLevel],
+      price: engine.fineAtLevel(state.priceLevel),
       billed: state.billed,
       paid: state.paid,
       outstanding: state.outstanding,

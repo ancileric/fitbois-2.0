@@ -64,6 +64,7 @@ const DDL = `
     day_of_week INTEGER NOT NULL,
     date TEXT NOT NULL,
     is_completed BOOLEAN NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'session',
     workout_type TEXT,
     notes TEXT,
     marked_by TEXT NOT NULL DEFAULT 'admin',
@@ -147,4 +148,32 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id);
 `;
 
-module.exports = { DDL, INDEXES };
+/**
+ * Columns a database created before this version will not have.
+ *
+ * CREATE TABLE IF NOT EXISTS leaves an existing table alone, so every column
+ * added after a table shipped has to arrive as its own ALTER. Duplicates are
+ * expected and ignored by the callers — the server on boot, and the seed script.
+ */
+const MIGRATIONS = [
+  "ALTER TABLE users ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE users ADD COLUMN standing TEXT NOT NULL DEFAULT 'active'",
+  "ALTER TABLE users ADD COLUMN cutoff_hour INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE users ADD COLUMN week_end_day INTEGER NOT NULL DEFAULT 7",
+  "ALTER TABLE goals ADD COLUMN points INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE goals ADD COLUMN approved_at TEXT",
+  "ALTER TABLE fines ADD COLUMN price_level INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE fines ADD COLUMN issued_at TEXT",
+  "ALTER TABLE fines ADD COLUMN due_at TEXT",
+  "ALTER TABLE fines ADD COLUMN settled_at TEXT",
+  "ALTER TABLE fines ADD COLUMN waived_by_token_id TEXT",
+  "ALTER TABLE workout_days ADD COLUMN kind TEXT NOT NULL DEFAULT 'session'",
+  "ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE goals ADD COLUMN baseline_value REAL",
+  "ALTER TABLE goals ADD COLUMN target_value REAL",
+  "ALTER TABLE goals ADD COLUMN unit TEXT",
+  "ALTER TABLE fines ADD COLUMN voided_at TEXT",
+  "ALTER TABLE fines ADD COLUMN voided_reason TEXT",
+];
+
+module.exports = { DDL, INDEXES, MIGRATIONS };

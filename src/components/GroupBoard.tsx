@@ -33,8 +33,8 @@ interface GroupRow {
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; workouts: number; fine: number }[];
-  currentWeekProgress: { week: number; workouts: number; needed: number };
+  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  currentWeekProgress: { week: number; credits: number; needed: number };
 }
 
 interface GroupBoardProps {
@@ -42,6 +42,9 @@ interface GroupBoardProps {
 }
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+/** Credit reads as 3 or 3.5, never 3.0. */
+const credit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 const STANDING_STYLE: Record<Standing, string> = {
   active: "bg-clean-100 text-clean-700",
@@ -323,7 +326,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
                           />
                         ))}
                         <div
-                          title={`Week ${r.currentWeekProgress.week}: ${r.currentWeekProgress.workouts}/${r.currentWeekProgress.needed} so far`}
+                          title={`Week ${r.currentWeekProgress.week}: ${credit(r.currentWeekProgress.credits)}/${r.currentWeekProgress.needed} so far`}
                           className="h-4 flex-1 rounded-sm border border-dashed border-ink-faint"
                         />
                       </div>

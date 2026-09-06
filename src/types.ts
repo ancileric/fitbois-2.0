@@ -88,6 +88,9 @@ export interface WeeklyUpdate {
   submittedDate: string;
 }
 
+/** A session is a workout; 10k steps is half of one. */
+export type WorkoutKind = 'session' | 'steps';
+
 export interface WorkoutDay {
   id: string;
   userId: string;
@@ -95,6 +98,8 @@ export interface WorkoutDay {
   dayOfWeek: number; // 1-7 (Monday-Sunday)
   date: string;
   isCompleted: boolean;
+  /** What was logged. Absent on rows from before steps counted: read as a session. */
+  kind?: WorkoutKind;
   workoutType?: string;
   notes?: string;
   markedBy: 'user' | 'admin';

@@ -2,17 +2,18 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  Footprints,
   IndianRupee,
 
   ShieldCheck,
   Ticket,
   Trophy,
 } from "lucide-react";
-import { User, WeeklyPlan, WorkoutDay } from "../types";
+import { User, WeeklyPlan, WorkoutDay, WorkoutKind } from "../types";
 import WeeklyPlanModal from "./WeeklyPlanModal";
 import { getWeekDates } from "../utils/dateUtils";
 import { apiFetch } from "../services/http";
-import { SEASON_WEEKS } from "../utils/seasonEngine";
+import { CREDIT_BY_KIND, SEASON_WEEKS } from "../utils/seasonEngine";
 
 /**
  * The home screen, written for one person: your week first, your money second,
@@ -21,6 +22,16 @@ import { SEASON_WEEKS } from "../utils/seasonEngine";
  */
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** Credit reads as 3 or 3½ — never 3.0. */
+const credit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+/** Tapping a day walks it round: nothing → a session → 10k steps → nothing. */
+const NEXT_KIND: Record<string, WorkoutKind | null> = {
+  none: "session",
+  session: "steps",
+  steps: null,
+};
 
 type Standing = "active" | "suspended" | "out";
 
@@ -35,7 +46,7 @@ interface SeasonView {
   userId: string;
   name: string;
   currentWeek: number;
-  priceLevel: 1 | 2 | 3;
+  priceLevel: number;
   fineIfMissed: number;
   standing: Standing;
   cleanWeeks: number;
@@ -47,8 +58,8 @@ interface SeasonView {
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; workouts: number; fine: number }[];
-  currentWeekProgress: { week: number; workouts: number; needed: number };
+  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  currentWeekProgress: { week: number; credits: number; needed: number };
   unsettledFines: UnsettledFine[];
 }
 
@@ -89,7 +100,7 @@ const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, co
       <div
         key={w.week}
         role="listitem"
-        title={`Week ${w.week}: ${w.workouts} workouts — ${OUTCOME_LABEL[w.outcome]}${
+        title={`Week ${w.week}: ${credit(w.credits)} workouts — ${OUTCOME_LABEL[w.outcome]}${
           w.fine ? ` (${rupees(w.fine)})` : ""
         }`}
         className={`flex-1 rounded-md ${compact ? "h-2.5" : "h-8"} ${OUTCOME_STYLE[w.outcome]}`}
@@ -98,7 +109,7 @@ const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, co
     {/* The current week is still open, so it reads as an outline, not a verdict. */}
     <div
       role="listitem"
-      title={`Week ${view.currentWeekProgress.week}: ${view.currentWeekProgress.workouts} of ${view.currentWeekProgress.needed} so far — still running`}
+      title={`Week ${view.currentWeekProgress.week}: ${credit(view.currentWeekProgress.credits)} of ${view.currentWeekProgress.needed} so far — still running`}
       className={`flex-1 rounded-md border-2 border-dashed border-ink-faint relative overflow-hidden ${
         compact ? "h-2.5" : "h-8"
       }`}
@@ -106,7 +117,7 @@ const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, co
       <div
         className="absolute inset-x-0 bottom-0 bg-clean-500/40"
         style={{
-          height: `${Math.min(100, (view.currentWeekProgress.workouts / view.currentWeekProgress.needed) * 100)}%`,
+          height: `${Math.min(100, (view.currentWeekProgress.credits / view.currentWeekProgress.needed) * 100)}%`,
         }}
       />
     </div>
@@ -211,13 +222,18 @@ const MySeason: React.FC<MySeasonProps> = ({
     }
   };
 
-  /** Log or unlog a day in the running week. Your sheet only. */
-  const toggleDay = (dayOfWeek: number) => {
+  /**
+   * Walk a day round the cycle: nothing → a session → 10k steps → nothing.
+   * Your sheet only, and only the running week.
+   */
+  const cycleDay = (dayOfWeek: number) => {
     if (!currentUser || !me) return;
     const week = me.currentWeekProgress.week;
     const existing = workoutDays.find(
       (w) => w.userId === currentUser.id && w.week === week && w.dayOfWeek === dayOfWeek
     );
+    const current = existing?.isCompleted ? existing.kind ?? "session" : "none";
+    const next = NEXT_KIND[current];
 
     onUpdateWorkoutDay({
       id: existing?.id || `workout-${currentUser.id}-${week}-${dayOfWeek}-${Date.now()}`,
@@ -225,7 +241,8 @@ const MySeason: React.FC<MySeasonProps> = ({
       week,
       dayOfWeek,
       date: new Date().toISOString().split("T")[0],
-      isCompleted: !existing?.isCompleted,
+      isCompleted: next !== null,
+      kind: next ?? existing?.kind ?? "session",
       workoutType: existing?.workoutType ?? "gym",
       notes: existing?.notes,
       markedBy: "user",
@@ -265,7 +282,7 @@ const MySeason: React.FC<MySeasonProps> = ({
   const todayDow = ((new Date().getDay() + 6) % 7) + 1;
   const weekEndDay = currentUser?.weekEndDay ?? 7;
   const daysLeft = Math.max(0, weekEndDay - todayDow + 1);
-  const done = me?.currentWeekProgress.workouts ?? 0;
+  const done = me?.currentWeekProgress.credits ?? 0;
   const needed = me?.currentWeekProgress.needed ?? 5;
   const left = Math.max(0, needed - done);
 
@@ -330,40 +347,59 @@ const MySeason: React.FC<MySeasonProps> = ({
             <div className="mt-5">
               <div className="flex items-baseline justify-between mb-2">
                 <p className="font-semibold text-ink">
-                  {left === 0 ? "This week is clean" : `${left} more workout${left === 1 ? "" : "s"} this week`}
+                  {left === 0
+                    ? "This week is clean"
+                    : `${credit(left)} more workout${left === 1 ? "" : "s"} this week`}
                 </p>
                 <p className="text-sm tnum text-ink-muted">
-                  {done}/{needed}
+                  {credit(done)}/{needed}
                 </p>
               </div>
 
               <div className="grid grid-cols-7 gap-1.5">
                 {DAYS.map((label, i) => {
                   const dow = i + 1;
-                  const logged = workoutDays.some(
+                  const row = workoutDays.find(
                     (w) =>
                       w.userId === me.userId &&
                       w.week === me.currentWeekProgress.week &&
                       w.dayOfWeek === dow &&
                       w.isCompleted
                   );
+                  const kind = row ? row.kind ?? "session" : null;
+                  const worth = kind ? CREDIT_BY_KIND[kind] : 0;
                   return (
                     <button
                       key={label}
-                      onClick={() => toggleDay(dow)}
+                      onClick={() => cycleDay(dow)}
                       disabled={me.standing === "out"}
-                      aria-pressed={logged}
-                      aria-label={`${label}: ${logged ? "logged" : "not logged"}`}
+                      aria-pressed={Boolean(kind)}
+                      aria-label={`${label}: ${
+                        kind === "session"
+                          ? "workout logged, tap for 10k steps"
+                          : kind === "steps"
+                            ? "10k steps logged — half a workout, tap to clear"
+                            : "nothing logged, tap for a workout"
+                      }`}
                       className={`min-h-[56px] rounded-xl border text-xs font-semibold cursor-pointer
                         transition-colors duration-150 ease-settle disabled:opacity-40 disabled:cursor-not-allowed
                         ${
-                          logged
+                          kind === "session"
                             ? "bg-clean-500 border-clean-500 text-paper"
-                            : "bg-paper-card border-line text-ink-muted hover:border-clean-500 hover:text-clean-600"
+                            : kind === "steps"
+                              ? "bg-clean-100 border-clean-500 text-clean-700"
+                              : "bg-paper-card border-line text-ink-muted hover:border-clean-500 hover:text-clean-600"
                         }`}
                     >
                       <span className="block">{label}</span>
-                      {logged ? <Check size={14} className="mx-auto mt-1" aria-hidden="true" /> : null}
+                      {kind === "session" ? (
+                        <Check size={14} className="mx-auto mt-1" aria-hidden="true" />
+                      ) : kind === "steps" ? (
+                        <Footprints size={14} className="mx-auto mt-1" aria-hidden="true" />
+                      ) : null}
+                      {kind ? (
+                        <span className="sr-only">worth {worth} of a workout</span>
+                      ) : null}
                     </button>
                   );
                 })}

@@ -3,34 +3,48 @@ import {
   skipTokenBlocker,
   goalSplitError,
   goalProgressFraction,
-  FINE_BY_LEVEL,
+  fineAtLevel,
+  FINE_BASE,
   WORKOUTS_PER_WEEK,
   MAX_SKIP_TOKENS,
   SEASON_WEEKS,
 } from './seasonEngine';
 import { WorkoutDay } from '../types';
 
-/** Build workout rows from a per-week count: [5, 3] = week 1 clean, week 2 missed. */
-const workouts = (userId: string, perWeek: number[]): WorkoutDay[] => {
+/**
+ * Build workout rows from a per-week entry.
+ *
+ * A number is that many sessions: [5, 3] = week 1 clean, week 2 missed.
+ * A pair is [sessions, stepDays]: [3, 4] in week 1 is 3 + 4×½ = 5 credits.
+ */
+type WeekEntry = number | [number, number];
+
+const workouts = (userId: string, perWeek: WeekEntry[]): WorkoutDay[] => {
   const rows: WorkoutDay[] = [];
-  perWeek.forEach((count, i) => {
-    for (let d = 1; d <= count; d++) {
+  perWeek.forEach((entry, i) => {
+    const [sessions, steps] = Array.isArray(entry) ? entry : [entry, 0];
+    let day = 1;
+    const push = (kind: 'session' | 'steps') => {
       rows.push({
-        id: `${userId}-w${i + 1}-d${d}`,
+        id: `${userId}-w${i + 1}-d${day}`,
         userId,
         week: i + 1,
-        dayOfWeek: d,
+        dayOfWeek: day,
         date: '2026-01-19',
         isCompleted: true,
+        kind,
         markedBy: 'user',
         timestamp: '2026-01-19T10:00:00Z',
       });
-    }
+      day++;
+    };
+    for (let d = 0; d < sessions; d++) push('session');
+    for (let d = 0; d < steps; d++) push('steps');
   });
   return rows;
 };
 
-const season = (perWeek: number[], opts: { skipWeeks?: number[]; settledWeeks?: number[] } = {}) =>
+const season = (perWeek: WeekEntry[], opts: { skipWeeks?: number[]; settledWeeks?: number[] } = {}) =>
   runSeason({
     userId: 'u1',
     workoutDays: workouts('u1', perWeek),
@@ -55,33 +69,58 @@ describe('what makes a week clean', () => {
   test('the threshold is the same for everyone, every week', () => {
     expect(WORKOUTS_PER_WEEK).toBe(5);
   });
+
+  test('10k steps is half a workout, so two step days make one', () => {
+    expect(season([[4, 2]]).weeks[0].credits).toBe(5);
+    expect(season([[4, 2]]).weeks[0].outcome).toBe('clean');
+    expect(season([[4, 1]]).weeks[0].credits).toBe(4.5);
+    expect(season([[4, 1]]).weeks[0].outcome).toBe('missed');
+  });
+
+  test('a week cannot be walked clean — seven step days is 3.5', () => {
+    expect(season([[0, 7]]).weeks[0].credits).toBe(3.5);
+    expect(season([[0, 7]]).weeks[0].outcome).toBe('missed');
+  });
+
+  test('a row logged before steps existed still counts as a session', () => {
+    const legacy = workouts('u1', [5]).map(({ kind, ...rest }) => rest as WorkoutDay);
+    const s = runSeason({ userId: 'u1', workoutDays: legacy, completedWeeks: 1 });
+    expect(s.weeks[0].credits).toBe(5);
+    expect(s.weeks[0].outcome).toBe('clean');
+  });
 });
 
 describe('the price ladder', () => {
-  test('everyone starts at ₹500', () => {
+  test('everyone starts at ₹200', () => {
     expect(season([]).priceLevel).toBe(1);
-    expect(FINE_BY_LEVEL[1]).toBe(500);
+    expect(FINE_BASE).toBe(200);
+    expect(fineAtLevel(1)).toBe(200);
   });
 
-  test('3 misses raise the price', () => {
-    const s = season([0, 0, 0], { settledWeeks: paidUp(3) });
-    expect(s.priceLevel).toBe(2);
-    expect(s.billed).toBe(1500);
+  test('every level doubles the one below it', () => {
+    expect([1, 2, 3, 4, 5].map(fineAtLevel)).toEqual([200, 400, 800, 1600, 3200]);
   });
 
-  test('the 4th miss is charged at the new price', () => {
-    expect(season([0, 0, 0, 0], { settledWeeks: paidUp(4) }).billed).toBe(2500);
+  test('two strikes at a price, then it doubles', () => {
+    const s = season([0, 0, 0, 0, 0, 0], { settledWeeks: paidUp(6) });
+    expect(s.weeks.map((w) => w.fine)).toEqual([200, 200, 400, 400, 800, 800]);
+    expect(s.billed).toBe(2800);
   });
 
-  test('3 clean weeks bring it back down', () => {
-    const s = season([0, 0, 0, 5, 5, 5], { settledWeeks: paidUp(6) });
+  test('the third miss is charged at the doubled price', () => {
+    expect(season([0, 0, 0], { settledWeeks: paidUp(3) }).weeks[2].fine).toBe(400);
+  });
+
+  test('two clean weeks halve it again', () => {
+    const s = season([0, 0, 5, 5, 0], { settledWeeks: paidUp(5) });
     expect(s.priceLevel).toBe(1);
+    expect(s.weeks[4].fine).toBe(200);
   });
 
-  test('₹2,000 is the ceiling', () => {
-    const s = season(Array(9).fill(0), { settledWeeks: paidUp(9) });
-    expect(s.priceLevel).toBe(3);
-    expect(s.billed).toBe(3 * 500 + 3 * 1000 + 3 * 2000);
+  test('the ladder has no ceiling', () => {
+    const s = season(Array(8).fill(0), { settledWeeks: paidUp(8) });
+    expect(s.priceLevel).toBe(5);
+    expect(s.weeks[7].fine).toBe(1600);
   });
 
   test('a broken streak restarts the count', () => {
@@ -95,7 +134,7 @@ describe('paying, suspension and elimination', () => {
   test('the fine week itself is still inside the grace period', () => {
     const s = season([0]);
     expect(s.standing).toBe('active');
-    expect(s.outstanding).toBe(500);
+    expect(s.outstanding).toBe(200);
   });
 
   test('carrying the balance into the next week suspends', () => {
@@ -107,7 +146,7 @@ describe('paying, suspension and elimination', () => {
   test('paying inside the week keeps you active', () => {
     const s = season([0, 5], { settledWeeks: [1] });
     expect(s.standing).toBe('active');
-    expect(s.paid).toBe(500);
+    expect(s.paid).toBe(200);
     expect(s.outstanding).toBe(0);
   });
 
@@ -186,7 +225,7 @@ describe('skip tokens', () => {
     const s = season([0, 0, 0, 0], { skipWeeks: [1, 2, 3, 4] });
     expect(s.tokensUsed).toBe(3);
     expect(s.missedWeeks).toBe(1);
-    expect(s.billed).toBe(500);
+    expect(s.billed).toBe(200);
     expect(s.weeks[3].outcome).toBe('missed');
   });
 

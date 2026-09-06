@@ -14,17 +14,30 @@
  * Types are in seasonEngine.d.ts.
  */
 
-/** A clean week is 5 workouts. Flat for everyone, every week. */
+/** A clean week is 5 workouts' worth of credit. Flat for everyone, every week. */
 const WORKOUTS_PER_WEEK = 5;
+
+/**
+ * What a logged day is worth.
+ *
+ * A session is a workout. 10k steps is half of one, so two step days make a
+ * workout — and since a day can only be logged once, seven step days come to
+ * 3.5 and no week can be walked clean.
+ */
+const CREDIT_BY_KIND = { session: 1, steps: 0.5 };
+const DEFAULT_KIND = 'session';
 
 /** The season is 24 weeks long. Nothing can be logged outside it. */
 const SEASON_WEEKS = 24;
 
-/** The ladder sets what a miss costs. Everyone starts at level 1. */
-const FINE_BY_LEVEL = { 1: 500, 2: 1000, 3: 2000 };
+/** What the first miss costs. Every level after it doubles. */
+const FINE_BASE = 200;
 
-/** Misses at one price before it rises; clean weeks in a row before it falls. */
-const WEEKS_TO_MOVE = 3;
+/** Misses at one price before it doubles; clean weeks in a row before it halves. */
+const WEEKS_TO_MOVE = 2;
+
+/** What a miss costs at a given level: 200, 400, 800, 1600 … */
+const fineAtLevel = (level) => FINE_BASE * 2 ** (Math.max(1, level) - 1);
 
 const MAX_SKIP_TOKENS = 3;
 const MAX_CONSECUTIVE_TOKENS = 2;
@@ -36,8 +49,11 @@ const PAYMENT_GRACE_HOURS = 48;
 const FINES_TO_ELIMINATE = 2;
 
 
-const countWorkouts = (userId, workoutDays, week) =>
-  workoutDays.filter((w) => w.userId === userId && w.week === week && w.isCompleted).length;
+/** A week's credit: sessions at 1, step days at a half. */
+const creditsIn = (userId, workoutDays, week) =>
+  workoutDays
+    .filter((w) => w.userId === userId && w.week === week && w.isCompleted)
+    .reduce((sum, w) => sum + (CREDIT_BY_KIND[w.kind] ?? CREDIT_BY_KIND[DEFAULT_KIND]), 0);
 
 /**
  * Replay the season and derive everything from it.
@@ -85,31 +101,31 @@ const runSeason = ({
       suspendedAtWeek = week;
     }
 
-    const workouts = countWorkouts(userId, workoutDays, week);
-    const isClean = workouts >= WORKOUTS_PER_WEEK;
+    const credits = creditsIn(userId, workoutDays, week);
+    const isClean = credits >= WORKOUTS_PER_WEEK;
     const isSkipped = honouredSkips.has(week);
 
     if (isSkipped && !isClean) {
       // A token cancels the fine and leaves the ladder untouched: neither a
       // clean week nor a missed one.
       tokensUsed++;
-      weeks.push({ week, outcome: 'skipped', workouts, priceLevel, fine: 0 });
+      weeks.push({ week, outcome: 'skipped', credits, priceLevel, fine: 0 });
     } else if (isClean) {
       cleanWeeks++;
       cleanStreak++;
-      weeks.push({ week, outcome: 'clean', workouts, priceLevel, fine: 0 });
+      weeks.push({ week, outcome: 'clean', credits, priceLevel, fine: 0 });
       if (cleanStreak === WEEKS_TO_MOVE && priceLevel > 1) {
         priceLevel = priceLevel - 1;
         cleanStreak = 0;
         missesAtLevel = 0;
       }
     } else {
-      const fine = FINE_BY_LEVEL[priceLevel];
+      const fine = fineAtLevel(priceLevel);
       missedWeeks++;
       billed += fine;
       if (outstanding === 0) outstandingSince = week;
       outstanding += fine;
-      weeks.push({ week, outcome: 'missed', workouts, priceLevel, fine });
+      weeks.push({ week, outcome: 'missed', credits, priceLevel, fine });
 
       if (standing === 'suspended') {
         finesWhileSuspended++;
@@ -121,7 +137,7 @@ const runSeason = ({
 
       cleanStreak = 0;
       missesAtLevel++;
-      if (missesAtLevel === WEEKS_TO_MOVE && priceLevel < 3) {
+      if (missesAtLevel === WEEKS_TO_MOVE) {
         priceLevel = priceLevel + 1;
         missesAtLevel = 0;
       }
@@ -161,7 +177,7 @@ const runSeason = ({
 };
 
 /** What a miss costs this player right now. */
-const currentFine = (state) => FINE_BY_LEVEL[state.priceLevel];
+const currentFine = (state) => fineAtLevel(state.priceLevel);
 
 /**
  * Why a skip token can't be used this week, or null when it can.
@@ -272,8 +288,10 @@ const goalProgressFraction = (baseline, target, current) => {
 module.exports = {
   goalProgressFraction,
   WORKOUTS_PER_WEEK,
+  CREDIT_BY_KIND,
   SEASON_WEEKS,
-  FINE_BY_LEVEL,
+  FINE_BASE,
+  fineAtLevel,
   WEEKS_TO_MOVE,
   MAX_SKIP_TOKENS,
   MAX_CONSECUTIVE_TOKENS,
