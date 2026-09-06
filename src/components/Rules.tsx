@@ -166,13 +166,6 @@ const Rules: React.FC = () => {
                     </table>
                   ) : null}
 
-                  {rule.hasDefault ? (
-                    <p className="text-xs text-skip-600 bg-skip-50 rounded-lg px-3 py-2">
-                      This one took a suggested default. Say so at Week 0 if the group wants it
-                      different.
-                    </p>
-                  ) : null}
-
                   {rule.ties.length ? (
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted mr-1">
