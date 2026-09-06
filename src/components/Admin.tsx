@@ -41,6 +41,7 @@ const Admin: React.FC<AdminProps> = ({
   const { showToast } = useToast();
   const [showAddUser, setShowAddUser] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [checkingFines, setCheckingFines] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -161,6 +162,37 @@ const Admin: React.FC<AdminProps> = ({
         .reduce((sum, w) => sum + (CREDIT_BY_KIND[w.kind ?? 'session'] ?? 1), 0) < WORKOUTS_PER_WEEK
   ).length;
 
+  /**
+   * Replay every player's season and make the fines on record match it.
+   *
+   * Closing a week already does this, so most of the time the honest answer is
+   * "nothing to change". It earns its place when the sheet changes after the
+   * fact — someone back-logs a workout for a closed week, and the fine that
+   * week no longer deserves has to be voided.
+   */
+  const recheckFines = async () => {
+    setCheckingFines(true);
+    try {
+      const res = await apiFetch('/fines/sync', { method: 'POST', body: '{}' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error ?? 'Could not recheck the fines', 'error');
+        return;
+      }
+      const posted = Number(data.finesIssued ?? 0);
+      const voided = Number(data.finesVoided ?? 0);
+      showToast(
+        posted || voided
+          ? `${posted} fine${posted === 1 ? '' : 's'} posted, ${voided} voided`
+          : 'Every fine already matches the sheet',
+        'success'
+      );
+      onRecalculateConsistency?.();
+    } finally {
+      setCheckingFines(false);
+    }
+  };
+
   const advanceWeek = async () => {
     setAdvancing(true);
     try {
@@ -225,16 +257,14 @@ const Admin: React.FC<AdminProps> = ({
             <span className="hidden sm:inline">Add User</span>
           </button>
           <button
-            onClick={() => {
-              if (onRecalculateConsistency) {
-                onRecalculateConsistency();
-                showToast('Consistency metrics recalculated', 'success');
-              }
-            }}
-            className="bg-paper-sunk text-ink px-3 py-2 rounded-lg hover:bg-line flex items-center space-x-2"
+            onClick={recheckFines}
+            disabled={checkingFines}
+            title="Replay every season and correct the fines on record"
+            className="bg-paper-sunk text-ink px-3 py-2 rounded-lg hover:bg-line flex items-center space-x-2
+                       disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RotateCcw size={18} />
-            <span className="hidden sm:inline">Recalc</span>
+            <RotateCcw size={18} className={checkingFines ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">Recheck fines</span>
           </button>
         </div>
       </div>

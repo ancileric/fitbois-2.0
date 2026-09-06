@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Share2, Trophy } from "lucide-react";
+import { Share2, Trophy } from "lucide-react";
 import { User } from "../types";
 import Feed from "./Feed";
 import PlayerSheet from "./PlayerSheet";
@@ -51,7 +51,6 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
   const [rows, setRows] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [openPlayer, setOpenPlayer] = useState<string | null>(null);
 
@@ -86,20 +85,6 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
       }),
     [rows]
   );
-
-  const syncFines = async () => {
-    setBusy(true);
-    try {
-      await apiFetch(`/fines/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const share = async () => {
     try {
@@ -164,15 +149,6 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
           >
             <Share2 size={16} aria-hidden="true" />
             Share
-          </button>
-          <button
-            onClick={syncFines}
-            disabled={busy}
-            className="flex items-center gap-2 min-h-[44px] px-4 bg-ink text-paper rounded-xl text-sm font-semibold
-                       cursor-pointer transition-colors duration-150 ease-settle hover:bg-ink-muted disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={busy ? "animate-spin" : ""} aria-hidden="true" />
-            Post due fines
           </button>
           </div>
         </div>

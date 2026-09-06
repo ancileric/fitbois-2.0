@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Goal } from "../types";
-import { apiFetch, latestGoalReadings } from "../services/http";
+import { apiFetch } from "../services/http";
+import { GoalTrack, Reading, goalReadings } from "./GoalBoard";
 
 /**
  * One player's season, opened from the group list.
@@ -40,7 +41,7 @@ const OUTCOME_STYLE = {
 const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId, onClose }) => {
   const [season, setSeason] = useState<Season | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [progress, setProgress] = useState<Record<string, number>>({});
+  const [progress, setProgress] = useState<Record<string, Reading[]>>({});
 
   const load = useCallback(async () => {
     const [seasonRes, goalsRes] = await Promise.all([
@@ -52,7 +53,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
     setSeason(seasonData);
     setGoals(goalData);
 
-    setProgress(await latestGoalReadings());
+    setProgress(await goalReadings());
   }, [userId]);
 
   useEffect(() => {
@@ -65,13 +66,6 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  const fractionFor = (goal: Goal): number | null => {
-    const current = progress[goal.id];
-    if (goal.baselineValue == null || goal.targetValue == null || current == null) return null;
-    if (goal.targetValue === goal.baselineValue) return current >= goal.targetValue ? 1 : 0;
-    return Math.max(0, Math.min(1, (current - goal.baselineValue) / (goal.targetValue - goal.baselineValue)));
-  };
 
   return (
     <div
@@ -139,7 +133,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
             </p>
             <ul className="divide-y divide-line border-t border-line">
               {goals.map((goal) => {
-                const fraction = fractionFor(goal);
+                const measured = goal.baselineValue != null && goal.targetValue != null;
                 return (
                   <li key={goal.id} className="py-3">
                     <div className="flex items-start gap-2">
@@ -150,18 +144,9 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
                         {goal.description}
                       </p>
                     </div>
-                    {fraction !== null ? (
-                      <div className="mt-2 pl-14">
-                        <div className="h-1.5 rounded-full bg-line overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${fraction === 1 ? "bg-clean-500" : "bg-ink"}`}
-                            style={{ width: `${fraction * 100}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-ink-muted mt-1 tnum">
-                          {progress[goal.id]} / {goal.targetValue}
-                          {goal.unit ? ` ${goal.unit}` : ""} · {Math.round(fraction * 100)}%
-                        </p>
+                    {measured ? (
+                      <div className="pl-14">
+                        <GoalTrack goal={goal} readings={progress[goal.id] ?? []} />
                       </div>
                     ) : null}
                   </li>

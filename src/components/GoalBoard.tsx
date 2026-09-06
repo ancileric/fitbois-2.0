@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Gavel, Lock, Plus, Stamp, TrendingUp, Trash2 } from "lucide-react";
 import { Goal, GOAL_BUDGET, GOAL_TIERS, User } from "../types";
 import { goalEligibilityError, goalProgressFraction } from "../utils/seasonEngine";
-import { apiFetch, latestGoalReadings } from "../services/http";
+import { apiFetch } from "../services/http";
 
 /**
  * Rule 02: every player spends exactly 6 points across 2 to 6 goals.
@@ -40,6 +40,196 @@ const TIER_STYLE: Record<number, string> = {
   1: "bg-paper-sunk text-ink-muted",
 };
 
+/** One logged reading, exactly as the server stores it. */
+export interface Reading {
+  id: string;
+  value: number;
+  note: string | null;
+  recordedAt: string;
+}
+
+/**
+ * Every reading for every goal, in time order, keyed by goal id.
+ *
+ * The whole history, not just the newest — the track below is the point: a
+ * player should see how many times they moved and how far each move took them.
+ */
+export const goalReadings = async (): Promise<Record<string, Reading[]>> => {
+  const res = await apiFetch("/goals/progress");
+  return res.ok ? await res.json() : {};
+};
+
+/** 47.8 stays 47.8; 48.0 reads as 48. */
+const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2))));
+
+const stamp = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
+
+/**
+ * The journey from baseline to target, one segment per logged reading.
+ *
+ * Positions are by value, not by count — a reading that jumped halfway sits
+ * halfway — so the gaps between the notches *are* the size of each move. The
+ * newest is the solid, larger one; a reading that went backwards is drawn in
+ * `owed` from where it fell back to.
+ */
+export const GoalTrack: React.FC<{ goal: Goal; readings: Reading[] }> = ({ goal, readings }) => {
+  const base = goal.baselineValue;
+  const target = goal.targetValue;
+  if (base == null || target == null) return null;
+
+  const unit = goal.unit ? ` ${goal.unit}` : "";
+  const at = (v: number) => (goalProgressFraction(base, target, v) ?? 0) * 100;
+
+  const steps = readings.map((r, i) => {
+    const previous = i === 0 ? base : readings[i - 1].value;
+    return {
+      r,
+      from: at(previous),
+      to: at(r.value),
+      move: r.value - previous,
+      last: i === readings.length - 1,
+    };
+  });
+
+  const now = steps.length ? steps[steps.length - 1].to : 0;
+  const done = goal.isCompleted || now >= 100;
+  const newest = readings.length ? readings[readings.length - 1].value : null;
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-baseline justify-between gap-2 text-[11px] tnum text-ink-muted">
+        <span>
+          {num(base)}
+          {unit} start
+        </span>
+        <span>
+          {num(target)}
+          {unit} target
+        </span>
+      </div>
+
+      <div
+        className="relative h-11"
+        role="meter"
+        aria-valuenow={Math.round(now)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${goal.description} progress`}
+      >
+        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-line" />
+
+        {steps.map(({ r, from, to, move, last }, i) => {
+          const lo = Math.min(from, to);
+          const hi = Math.max(from, to);
+          const back = to < from;
+          // 44px each where there's room. Two readings close in value would
+          // otherwise stack their hit areas and make the older one untappable,
+          // so a crowded step gives up width down to its neighbour's edge.
+          const gap = Math.min(
+            i > 0 ? Math.abs(to - steps[i - 1].to) : 100,
+            i < steps.length - 1 ? Math.abs(steps[i + 1].to - to) : 100
+          );
+          const tip =
+            to < 25
+              ? "left-1/2 -translate-x-[10px]"
+              : to > 75
+              ? "right-1/2 translate-x-[10px]"
+              : "left-1/2 -translate-x-1/2";
+
+          return (
+            <React.Fragment key={r.id}>
+              <div
+                aria-hidden
+                className={`absolute top-1/2 -translate-y-1/2 h-1.5 rounded-full
+                            transition-[left,width] duration-500 ease-settle ${
+                              back
+                                ? "bg-owed-500"
+                                : last
+                                ? done
+                                  ? "bg-clean-500"
+                                  : "bg-ink"
+                                : "bg-ink-faint"
+                            }`}
+                // A step back is short and starts where the next one starts, so
+                // it has to sit above its neighbours or the recovery paints over it.
+                style={{
+                  left: `${lo}%`,
+                  width: `max(3px, calc(${hi - lo}% - 3px))`,
+                  zIndex: back ? 1 : undefined,
+                }}
+              />
+
+              <button
+                type="button"
+                style={{
+                  left: `${to}%`,
+                  zIndex: 10 + i,
+                  width: `min(2.75rem, max(1.25rem, ${gap}%))`,
+                }}
+                aria-label={
+                  `Reading ${i + 1} of ${steps.length}: ${num(r.value)}${unit}, ` +
+                  `${move >= 0 ? "up" : "down"} ${num(Math.abs(move))}${unit}, ${stamp(r.recordedAt)}` +
+                  (r.note ? `. ${r.note}` : "")
+                }
+                className="group absolute top-0 h-11 -translate-x-1/2 grid place-items-center
+                           rounded-full cursor-default focus:outline-none
+                           focus-visible:ring-2 focus-visible:ring-clean-500"
+              >
+                <span
+                  className={`block rounded-full transition-transform duration-200 ease-settle
+                              group-hover:scale-125 group-focus-visible:scale-125 ${
+                                last
+                                  ? `h-3.5 w-3.5 ${done ? "bg-clean-500" : "bg-ink"}`
+                                  : back
+                                  ? "h-2 w-2 bg-owed-500"
+                                  : "h-2 w-2 bg-ink-faint"
+                              }`}
+                />
+                <span
+                  aria-hidden
+                  className={`pointer-events-none absolute bottom-full mb-1 z-20 w-max max-w-[180px]
+                              rounded-lg border border-line bg-paper-card shadow-lift px-2 py-1.5
+                              text-left text-[11px] leading-snug text-ink-muted
+                              opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100
+                              transition-opacity duration-150 ease-settle ${tip}`}
+                >
+                  <span className="block font-semibold tnum text-ink">
+                    {num(r.value)}
+                    {unit}
+                    <span className={back ? "text-owed-600" : "text-clean-600"}>
+                      {" "}
+                      {move >= 0 ? "+" : "−"}
+                      {num(Math.abs(move))}
+                    </span>
+                  </span>
+                  {r.note ? <span className="block">{r.note}</span> : null}
+                  <span className="block tnum">{stamp(r.recordedAt)}</span>
+                </span>
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      <p className={`text-xs mt-0.5 tnum ${done ? "text-clean-600" : "text-ink-muted"}`}>
+        {newest === null ? (
+          "No readings yet — log one and each update lands as its own step."
+        ) : (
+          <>
+            {steps.length} reading{steps.length > 1 ? "s" : ""} ·{" "}
+            <strong className={done ? "text-clean-600" : "text-ink"}>
+              {num(newest)}
+              {unit}
+            </strong>{" "}
+            · {Math.round(now)}%{done ? " · done" : ""}
+          </>
+        )}
+      </p>
+    </div>
+  );
+};
+
 const GoalBoard: React.FC<GoalBoardProps> = ({
   currentUser,
   user,
@@ -71,7 +261,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [logging, setLogging] = useState<string | null>(null);
   const [reading, setReading] = useState("");
-  const [latest, setLatest] = useState<Record<string, number>>({});
+  const [readings, setReadings] = useState<Record<string, Reading[]>>({});
 
   // Petitions live on the server, so every player sees the same ones — the
   // point of raising one is that the rest of the group learns about it.
@@ -84,22 +274,18 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     loadPetitions().catch(() => {});
   }, [loadPetitions, goals]);
 
-  // The newest reading for each goal, so a bar can show where the player is.
+  // Every reading for each goal, so the track can show the whole journey.
   useEffect(() => {
     let cancelled = false;
-    latestGoalReadings()
-      .then((readings) => {
-        if (!cancelled) setLatest(readings);
+    goalReadings()
+      .then((rows) => {
+        if (!cancelled) setReadings(rows);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [goals]);
-
-  /** Same function the server completes a goal with, so the bar can't lie. */
-  const fractionFor = (goal: Goal): number | null =>
-    goalProgressFraction(goal.baselineValue, goal.targetValue, latest[goal.id]);
 
   const openPetition = (goalId: string) =>
     petitions.find((p) => p.goalId === goalId && p.status === "open") ?? null;
@@ -150,7 +336,9 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
     });
     if (res.ok) {
       const body = await res.json();
-      setLatest((prev) => ({ ...prev, [goal.id]: value }));
+      // The server owns the row's id and timestamp, so re-read rather than
+      // guess — a fabricated step would sit at the wrong date on the track.
+      goalReadings().then(setReadings).catch(() => {});
       if (body.completed && !goal.isCompleted) onUpdateGoal({ ...goal, isCompleted: true });
     }
     setLogging(null);
@@ -339,30 +527,7 @@ const GoalBoard: React.FC<GoalBoardProps> = ({
                   )}
                 </div>
               ) : null}
-              {(() => {
-                const fraction = fractionFor(goal);
-                if (fraction === null) return null;
-                const current = latest[goal.id];
-                return (
-                  <div className="mt-2">
-                    <div className="h-1.5 rounded-full bg-line overflow-hidden" role="meter"
-                      aria-valuenow={Math.round(fraction * 100)} aria-valuemin={0} aria-valuemax={100}
-                      aria-label={`${goal.description} progress`}>
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-500 ease-settle ${
-                          fraction === 1 ? "bg-clean-500" : "bg-ink"
-                        }`}
-                        style={{ width: `${fraction * 100}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-ink-muted mt-1 tnum">
-                      {goal.baselineValue} → <strong className="text-ink">{current}</strong> →{" "}
-                      {goal.targetValue}
-                      {goal.unit ? ` ${goal.unit}` : ""} · {Math.round(fraction * 100)}%
-                    </p>
-                  </div>
-                );
-              })()}
+              {measured ? <GoalTrack goal={goal} readings={readings[goal.id] ?? []} /> : null}
 
               {logging === goal.id ? (
                 <div className="mt-2 flex gap-2">

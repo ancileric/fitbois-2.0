@@ -5,12 +5,14 @@ import { apiFetch, latestGoalReadings } from "../services/http";
 /**
  * The season in numbers, at group scale.
  *
- * The table above answers "who is where". This answers the questions that need
- * the whole group at once: which weeks were hard for everybody, where your own
- * record sits in the pack, and how far the goals have actually moved.
+ * The table above answers "who is where" and the header tiles answer "what is in
+ * the pot". This answers the three things neither can: how the group is doing
+ * across the whole season, where you sit in the pack, and how the money piled up
+ * over time. Nothing here is a statistic anyone has to have been taught — a
+ * position, a bar, a running total.
  *
  * Colours are the two the season already has — a clean week is green, money is
- * rust — stepped for charts and validated against both grounds.
+ * rust — validated against both grounds.
  */
 
 interface WeekCell {
@@ -32,11 +34,10 @@ export interface StatsRow {
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
-const median = (values: number[]): number => {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+const ordinal = (n: number) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 };
 
 /** How far a goal has come, on the numbers rather than on a tick. */
@@ -47,9 +48,10 @@ const goalFraction = (goal: Goal, reading?: number): number => {
   return Math.max(0, Math.min(1, (reading - goal.baselineValue) / (goal.targetValue - goal.baselineValue)));
 };
 
+const SECTION_HEAD = "text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted";
+
 const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ rows, currentUserId }) => {
   const [goalPct, setGoalPct] = useState<Record<string, number> | null>(null);
-  const [numbers, setNumbers] = useState(false);
   const [hoverWeek, setHoverWeek] = useState<number | null>(null);
 
   useEffect(() => {
@@ -78,48 +80,55 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
     };
   }, []);
 
-  /** One row per week, counted across everybody who played it. */
+  /** One row per week, counted across everybody who played it, with the running bill. */
   const weeks = useMemo(() => {
     const played = Math.max(0, ...rows.map((r) => r.weeks.length));
+    let running = 0;
     return Array.from({ length: played }, (_, i) => {
       const cells = rows.map((r) => r.weeks[i]).filter(Boolean);
+      const fined = cells.reduce((sum, c) => sum + c.fine, 0);
+      running += fined;
       return {
         week: cells[0]?.week ?? i + 1,
         clean: cells.filter((c) => c.outcome === "clean").length,
         missed: cells.filter((c) => c.outcome === "missed").length,
-        fined: cells.reduce((sum, c) => sum + c.fine, 0),
+        fined,
+        running,
         players: cells.length,
       };
     });
   }, [rows]);
 
-  const me = rows.find((r) => r.userId === currentUserId) ?? null;
-  const maxFine = Math.max(1, ...weeks.map((w) => w.fined));
-  const billedTotal = weeks.reduce((sum, w) => sum + w.fined, 0);
+  /** Clean weeks, most first. Ties share a position, so 1st, 1st, 3rd. */
+  const standing = useMemo(() => {
+    const sorted = [...rows].sort((a, b) => b.cleanWeeks - a.cleanWeeks || b.cleanStreak - a.cleanStreak);
+    return sorted.map((r) => ({
+      ...r,
+      place: sorted.findIndex((o) => o.cleanWeeks === r.cleanWeeks) + 1,
+    }));
+  }, [rows]);
+
+  const me = standing.find((r) => r.userId === currentUserId) ?? null;
+  const leader = standing[0] ?? null;
+  const mostClean = Math.max(1, ...rows.map((r) => r.cleanWeeks));
+
+  const billedTotal = weeks.length ? weeks[weeks.length - 1].running : 0;
   const hovered = weeks.find((w) => w.week === hoverWeek) ?? null;
 
-  const strips = [
-    {
-      key: "clean",
-      label: "Clean weeks",
-      value: (r: StatsRow) => r.cleanWeeks,
-      format: (n: number) => String(n),
-    },
-    {
-      key: "streak",
-      label: "Clean weeks in a row",
-      value: (r: StatsRow) => r.cleanStreak,
-      format: (n: number) => String(n),
-    },
-    {
-      key: "paid",
-      label: "Fines paid",
-      value: (r: StatsRow) => r.paid,
-      format: (n: number) => rupees(n),
-    },
-  ];
+  const best = weeks.reduce<(typeof weeks)[number] | null>(
+    (b, w) => (!b || w.clean / w.players > b.clean / b.players ? w : b),
+    null
+  );
+  const worst = weeks.reduce<(typeof weeks)[number] | null>(
+    (b, w) => (!b || w.missed / w.players > b.missed / b.players ? w : b),
+    null
+  );
 
   const ranked = [...rows].sort((a, b) => (goalPct?.[b.userId] ?? 0) - (goalPct?.[a.userId] ?? 0));
+
+  /** 24 week labels do not fit a phone, so only the landmarks are printed. */
+  const labelled = (week: number, i: number) =>
+    weeks.length <= 12 || i === 0 || i === weeks.length - 1 || week % 4 === 0;
 
   if (!weeks.length) {
     return (
@@ -129,119 +138,88 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
 
   return (
     <section className="space-y-10">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h3 className="display text-2xl">The numbers</h3>
-          <p className="text-sm text-ink-muted mt-0.5">
-            {weeks.length} week{weeks.length === 1 ? "" : "s"} closed · {rupees(billedTotal)} billed
-            across the group
-          </p>
-        </div>
-        <button
-          onClick={() => setNumbers((n) => !n)}
-          aria-pressed={numbers}
-          className="min-h-[44px] px-4 border border-line rounded-xl text-sm font-semibold text-ink-muted
-                     cursor-pointer transition-colors duration-150 ease-settle hover:border-ink hover:text-ink"
-        >
-          {numbers ? "Hide numbers" : "Show numbers"}
-        </button>
+      <div>
+        <h3 className="display text-2xl">The numbers</h3>
+        <p className="text-sm text-ink-muted mt-0.5 tnum">
+          {weeks.length} week{weeks.length === 1 ? "" : "s"} closed · {rows.length} players
+        </p>
       </div>
 
-      {/* 1 — where one player sits in the pack */}
-      {me ? (
-        <div>
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-            {me.name} against the group
-          </h4>
-          <div className="mt-3 space-y-5">
-            {strips.map((strip) => {
-              const values = rows.map(strip.value);
-              const lo = Math.min(...values);
-              const hi = Math.max(...values);
-              const span = hi - lo || 1;
-              const mid = median(values);
-              const mine = strip.value(me);
-              const delta = mine - mid;
-              /* Kept off the edges so a dot at the extreme is not half-clipped. */
-              const at = (v: number) => 3 + ((v - lo) / span) * 94;
-
-              // Ties would sit on top of each other and hide half the group, so
-              // players on the same number stack instead of overlapping.
-              const tally: Record<number, number> = {};
-              values.forEach((v) => (tally[v] = (tally[v] ?? 0) + 1));
-              const seen: Record<number, number> = {};
-
-              return (
-                <div key={strip.key}>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-sm text-ink">{strip.label}</span>
-                    <span className="text-sm tnum text-ink-muted">
-                      <span className="font-semibold text-ink">{strip.format(mine)}</span>
-                      {" · group median "}
-                      {strip.format(mid)}
-                      {delta !== 0 ? ` · ${delta > 0 ? "+" : "−"}${strip.format(Math.abs(delta))}` : ""}
-                    </span>
-                  </div>
-
-                  <div
-                    className="relative h-12 mt-2"
-                    role="img"
-                    aria-label={`${strip.label}: you ${strip.format(mine)}, group median ${strip.format(
-                      mid
-                    )}, lowest ${strip.format(lo)}, highest ${strip.format(hi)}`}
-                  >
-                    <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
-                    <div
-                      className="absolute top-0 bottom-0 w-px bg-ink-faint"
-                      style={{ left: `${at(mid)}%` }}
-                      title={`Group median ${strip.format(mid)}`}
-                    />
-                    {rows.map((r) => {
-                      const isMe = r.userId === me.userId;
-                      const value = strip.value(r);
-                      const rank = (seen[value] = (seen[value] ?? 0) + 1) - 1;
-                      const gap = Math.min(9, 36 / tally[value]);
-                      const offset = (rank - (tally[value] - 1) / 2) * gap;
-                      return (
-                        <span
-                          key={r.userId}
-                          title={`${r.name} — ${strip.format(value)}`}
-                          style={{ left: `${at(value)}%`, top: `calc(50% + ${offset}px)` }}
-                          className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-paper ${
-                            isMe ? "w-3.5 h-3.5 z-10" : "w-2.5 h-2.5 bg-ink-faint"
-                          }`}
-                        >
-                          {isMe ? (
-                            <span
-                              className="block w-full h-full rounded-full"
-                              style={{ background: "rgb(var(--chart-clean))" }}
-                            />
-                          ) : null}
-                        </span>
-                      );
-                    })}
-                  </div>
-                  <div className="flex justify-between text-xs text-ink-muted tnum mt-1">
-                    <span>{strip.format(lo)}</span>
-                    <span>{strip.format(hi)}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* 1 — where one player sits in the pack, as a plain finishing order */}
+      <div>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h4 className={SECTION_HEAD}>Clean weeks — the order</h4>
+          {me && leader ? (
+            <p className="text-sm text-ink tnum">
+              <span className="font-semibold">
+                {me.place === 1 ? "You lead" : `You are ${ordinal(me.place)} of ${rows.length}`}
+              </span>
+              {me.place === 1
+                ? ` — ${me.cleanWeeks} clean week${me.cleanWeeks === 1 ? "" : "s"}`
+                : ` — ${leader.cleanWeeks - me.cleanWeeks} behind ${leader.name}`}
+            </p>
+          ) : null}
         </div>
-      ) : null}
+
+        <ul className="mt-3 space-y-2.5">
+          {standing.map((r) => {
+            const isMe = r.userId === currentUserId;
+            return (
+              <li key={r.userId} className="flex items-center gap-3">
+                <span className="text-xs tnum text-ink-muted w-7 shrink-0 text-right">
+                  {ordinal(r.place)}
+                </span>
+                <span
+                  className={`text-sm w-20 sm:w-28 shrink-0 truncate ${
+                    isMe ? "font-semibold text-ink" : "text-ink-muted"
+                  }`}
+                >
+                  {r.name}
+                </span>
+                <span
+                  className="flex-1 h-2.5 rounded-full bg-paper-sunk overflow-hidden"
+                  role="img"
+                  aria-label={`${r.name}: ${r.cleanWeeks} clean weeks, ${ordinal(r.place)} of ${rows.length}`}
+                >
+                  <span
+                    className="block h-full rounded-full transition-[width] duration-300 ease-settle"
+                    style={{
+                      width: `${Math.max((r.cleanWeeks / mostClean) * 100, r.cleanWeeks ? 2 : 0)}%`,
+                      background: isMe ? "rgb(var(--chart-clean))" : "rgb(var(--ink-faint))",
+                    }}
+                  />
+                </span>
+                <span
+                  className={`text-sm tnum w-16 sm:w-24 text-right shrink-0 ${
+                    isMe ? "text-ink" : "text-ink-muted"
+                  }`}
+                  title={`${r.cleanStreak} clean weeks in a row right now`}
+                >
+                  {r.cleanWeeks}
+                  <span className="text-ink-faint"> · {r.cleanStreak}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="text-xs text-ink-muted mt-2">
+          Clean weeks all season · current run of clean weeks in a row.
+        </p>
+      </div>
 
       {/* 2 — how the whole group handled each week */}
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-            Every week, everybody
-          </h4>
-          <p className="text-sm text-ink-muted tnum" role="status">
-            {hovered
-              ? `Week ${hovered.week} — ${hovered.clean} clean · ${hovered.missed} fined`
-              : "Pick a week for the split"}
+          <h4 className={SECTION_HEAD}>Every week, everybody</h4>
+          <p className="text-sm text-ink tnum" role="status">
+            {hovered ? (
+              <>
+                <span className="font-semibold">Week {hovered.week}</span> — {hovered.clean} clean ·{" "}
+                {hovered.missed} fined
+              </>
+            ) : (
+              <span className="text-ink-muted">Tap a week for the split</span>
+            )}
           </p>
         </div>
 
@@ -249,32 +227,26 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           className="flex gap-1 h-36 mt-3 items-end"
           onMouseLeave={() => setHoverWeek(null)}
           role="img"
-          aria-label={`Clean and fined weeks for all ${rows.length} players, weeks 1 to ${
-            weeks[weeks.length - 1].week
-          }`}
+          aria-label={`How many of the ${rows.length} players went clean and how many were fined, each week from ${weeks[0].week} to ${weeks[weeks.length - 1].week}`}
         >
           {weeks.map((w) => (
             <div
               key={w.week}
               onMouseEnter={() => setHoverWeek(w.week)}
               onClick={() => setHoverWeek(w.week)}
-              className="flex-1 h-full flex flex-col gap-[2px] justify-end cursor-default"
+              title={`Week ${w.week} — ${w.clean} clean, ${w.missed} fined`}
+              className={`flex-1 h-full flex flex-col gap-[2px] justify-end cursor-default transition-opacity
+                          duration-150 ease-settle ${hovered && hovered.week !== w.week ? "opacity-40" : ""}`}
             >
               {w.missed ? (
                 <div
-                  style={{
-                    height: `${(w.missed / w.players) * 100}%`,
-                    background: "rgb(var(--chart-owed))",
-                  }}
+                  style={{ height: `${(w.missed / w.players) * 100}%`, background: "rgb(var(--chart-owed))" }}
                   className="rounded-t-md"
                 />
               ) : null}
               {w.clean ? (
                 <div
-                  style={{
-                    height: `${(w.clean / w.players) * 100}%`,
-                    background: "rgb(var(--chart-clean))",
-                  }}
+                  style={{ height: `${(w.clean / w.players) * 100}%`, background: "rgb(var(--chart-clean))" }}
                   className={w.missed ? "rounded-b-md" : "rounded-md"}
                 />
               ) : null}
@@ -282,75 +254,98 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           ))}
         </div>
         <div className="flex gap-1 mt-1.5">
-          {weeks.map((w) => (
+          {weeks.map((w, i) => (
             <span key={w.week} className="flex-1 text-center text-[10px] text-ink-muted tnum">
-              {w.week}
+              {labelled(w.week, i) ? w.week : " "}
             </span>
           ))}
         </div>
 
-        <ul className="flex flex-wrap gap-4 mt-3 text-xs text-ink-muted">
-          {[
-            ["Clean", "rgb(var(--chart-clean))"],
-            ["Fined", "rgb(var(--chart-owed))"],
-          ].map(([label, fill]) => (
-            <li key={label} className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm" style={{ background: fill }} aria-hidden="true" />
-              {label}
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mt-3">
+          <ul className="flex flex-wrap gap-4 text-xs text-ink-muted">
+            {[
+              ["Clean", "rgb(var(--chart-clean))"],
+              ["Fined", "rgb(var(--chart-owed))"],
+            ].map(([label, fill]) => (
+              <li key={label} className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm" style={{ background: fill }} aria-hidden="true" />
+                {label}
+              </li>
+            ))}
+          </ul>
+          {best && worst ? (
+            <p className="text-xs text-ink-muted tnum">
+              Best week {best.week} — {best.clean} of {best.players} clean · Roughest week {worst.week} —{" "}
+              {worst.missed} fined
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      {/* 3 — what those weeks cost */}
-      <div>
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-            Fines billed each week
-          </h4>
-          <p className="text-sm text-ink-muted tnum" role="status">
-            {hovered ? `Week ${hovered.week} — ${rupees(hovered.fined)}` : `Worst week ${rupees(maxFine)}`}
+      {/* 3 — how the money piled up, which the standings table cannot show */}
+      {billedTotal > 0 ? (
+        <div>
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h4 className={SECTION_HEAD}>What the season has cost</h4>
+            <p className="text-sm text-ink tnum" role="status">
+              {hovered ? (
+                <>
+                  <span className="font-semibold">By week {hovered.week}</span> — {rupees(hovered.running)}
+                  {hovered.fined ? ` · ${rupees(hovered.fined)} that week` : " · nothing that week"}
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">{rupees(billedTotal)}</span>
+                  <span className="text-ink-muted"> billed so far</span>
+                </>
+              )}
+            </p>
+          </div>
+
+          <div
+            className="flex gap-1 h-24 mt-3 items-end"
+            onMouseLeave={() => setHoverWeek(null)}
+            role="img"
+            aria-label={`Running total of fines billed, climbing to ${rupees(billedTotal)} by week ${
+              weeks[weeks.length - 1].week
+            }`}
+          >
+            {weeks.map((w) => (
+              <div
+                key={w.week}
+                onMouseEnter={() => setHoverWeek(w.week)}
+                onClick={() => setHoverWeek(w.week)}
+                title={`By week ${w.week} — ${rupees(w.running)}`}
+                className={`flex-1 h-full flex flex-col justify-end cursor-default transition-opacity
+                            duration-150 ease-settle ${hovered && hovered.week !== w.week ? "opacity-40" : ""}`}
+              >
+                <div
+                  className="rounded-t-md"
+                  style={{
+                    height: `${Math.max(w.running ? 3 : 0, (w.running / billedTotal) * 100)}%`,
+                    background: "rgb(var(--chart-owed))",
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-1 mt-1.5">
+            {weeks.map((w, i) => (
+              <span key={w.week} className="flex-1 text-center text-[10px] text-ink-muted tnum">
+                {labelled(w.week, i) ? w.week : " "}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-ink-muted mt-2">
+            Every fine the season has billed, added up as the weeks went by. A tall step is a week the group
+            paid for. Paid fines are the pot.
           </p>
         </div>
-
-        <div
-          className="flex gap-1 h-24 mt-3 items-end"
-          onMouseLeave={() => setHoverWeek(null)}
-          role="img"
-          aria-label={`Fines billed each week, highest ${rupees(maxFine)}`}
-        >
-          {weeks.map((w) => (
-            <div
-              key={w.week}
-              onMouseEnter={() => setHoverWeek(w.week)}
-              onClick={() => setHoverWeek(w.week)}
-              title={`Week ${w.week} — ${rupees(w.fined)}`}
-              className="flex-1 h-full flex flex-col justify-end cursor-default"
-            >
-              <div
-                className="rounded-t-md"
-                style={{
-                  height: `${Math.max(w.fined ? 3 : 0, (w.fined / maxFine) * 100)}%`,
-                  background: "rgb(var(--chart-owed))",
-                }}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="flex gap-1 mt-1.5">
-          {weeks.map((w) => (
-            <span key={w.week} className="flex-1 text-center text-[10px] text-ink-muted tnum">
-              {w.week}
-            </span>
-          ))}
-        </div>
-      </div>
+      ) : null}
 
       {/* 4 — how far the goals have actually moved */}
       <div>
-        <h4 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-          Goal progress
-        </h4>
+        <h4 className={SECTION_HEAD}>Goal progress</h4>
         <p className="text-sm text-ink-muted mt-0.5">
           Each player's six points, weighted by how far each goal has come.
         </p>
@@ -369,7 +364,11 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
                   >
                     {r.name}
                   </span>
-                  <span className="flex-1 h-2.5 rounded-full bg-paper-sunk overflow-hidden">
+                  <span
+                    className="flex-1 h-2.5 rounded-full bg-paper-sunk overflow-hidden"
+                    role="img"
+                    aria-label={`${r.name}: goals ${Math.round(pct * 100)} percent of the way there`}
+                  >
                     <span
                       className="block h-full rounded-full"
                       style={{
@@ -387,32 +386,6 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           </ul>
         )}
       </div>
-
-      {numbers ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Week by week, across the group</caption>
-            <thead>
-              <tr className="border-b border-line text-left">
-                <th className="py-2 pr-4 font-semibold text-ink">Week</th>
-                <th className="py-2 pr-4 font-semibold text-ink text-right">Clean</th>
-                <th className="py-2 pr-4 font-semibold text-ink text-right">Fined</th>
-                <th className="py-2 font-semibold text-ink text-right">Billed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {weeks.map((w) => (
-                <tr key={w.week} className="border-b border-line-soft last:border-0">
-                  <td className="py-2 pr-4 tnum text-ink">{w.week}</td>
-                  <td className="py-2 pr-4 tnum text-right text-ink-muted">{w.clean}</td>
-                  <td className="py-2 pr-4 tnum text-right text-ink-muted">{w.missed}</td>
-                  <td className="py-2 tnum text-right text-ink">{rupees(w.fined)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
     </section>
   );
 };
