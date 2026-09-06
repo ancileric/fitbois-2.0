@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
-import {
-  User,
-  Goal,
-  WeeklyPlan,
-  WorkoutDay,
-  AdminSettings,
-} from "./types";
+import { User, Goal, WorkoutDay, AdminSettings } from "./types";
 import Header from "./components/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
 import OfflineBanner from "./components/OfflineBanner";
@@ -35,7 +29,6 @@ interface Snapshot {
   users: User[];
   workoutDays: WorkoutDay[];
   goals: Goal[];
-  weeklyPlans: WeeklyPlan[];
 }
 
 const readSnapshot = (): Snapshot | null => {
@@ -77,9 +70,6 @@ function AppContent() {
   const [goals, setGoals] = useState<Goal[]>(initialSnapshot?.goals ?? []);
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>(
     initialSnapshot?.workoutDays ?? []
-  );
-  const [weeklyPlans, setWeeklyPlans] = useState<WeeklyPlan[]>(
-    initialSnapshot?.weeklyPlans ?? []
   );
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     challengeStartDate: "2026-01-19",
@@ -140,7 +130,7 @@ function AppContent() {
   const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
-   * Derived state (price level, standing, fines) is computed by the server from
+   * Derived state (price level, fines) is computed by the server from
    * the workout sheet, so the client only re-reads it. Kept as a hook because the
    * screens still call it after a change lands.
    */
@@ -164,14 +154,13 @@ function AppContent() {
 
   const loadData = useCallback(async (): Promise<boolean> => {
     try {
-      // Fire all four reads in parallel. A rejection on any required call
+      // Fire all three reads in parallel. A rejection on any required call
       // surfaces as "API unreachable" via the catch below — no separate
       // /api/health round-trip needed.
-      const [dbUsers, dbWorkouts, dbGoals, dbPlans] = await Promise.all([
+      const [dbUsers, dbWorkouts, dbGoals] = await Promise.all([
         apiService.getUsers(),
         apiService.getAllWorkouts(),
         apiService.getAllGoals(),
-        apiService.getWeeklyPlans().catch(() => [] as WeeklyPlan[]),
       ]);
 
       const recalculated = dbUsers;
@@ -179,7 +168,6 @@ function AppContent() {
       setUsers(recalculated);
       setWorkoutDays(dbWorkouts);
       setGoals(dbGoals);
-      setWeeklyPlans(dbPlans);
       setCurrentUser((prev) => {
         const remembered = prev?.id ?? localStorage.getItem("playerId");
         return recalculated.find((u) => u.id === remembered) ?? recalculated[0] ?? null;
@@ -189,7 +177,6 @@ function AppContent() {
         users: recalculated,
         workoutDays: dbWorkouts,
         goals: dbGoals,
-        weeklyPlans: dbPlans,
       });
       setSnapshotSavedAt(Date.now());
       setIsOffline(false);
@@ -399,44 +386,6 @@ function AppContent() {
     }
   };
 
-  const updateWeeklyPlan = async (plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: 'user' | 'admin';
-  }) => {
-    if (isOffline) {
-      showToast("Offline — changes can't be saved yet.", "error");
-      throw new Error("Offline");
-    }
-    if (isHydrating) {
-      showToast("Loading latest — try again in a moment.", "error");
-      throw new Error("Hydrating");
-    }
-    try {
-      const savedPlan = await apiService.saveWeeklyPlan(plan);
-      setWeeklyPlans((prev) => {
-        const existing = prev.find(
-          (p) => p.userId === savedPlan.userId && p.week === savedPlan.week,
-        );
-        return existing
-          ? prev.map((p) => (p.id === existing.id ? savedPlan : p))
-          : [...prev, savedPlan];
-      });
-      recalculateUserConsistency();
-      showToast(
-        `Plan saved for Week ${savedPlan.week} (${savedPlan.committedDays.length} days)`,
-        "success",
-      );
-      return savedPlan;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("Error saving weekly plan:", error);
-      showToast(`Failed to save plan: ${msg}`, "error");
-      throw error;
-    }
-  };
-
   const deleteUser = async (userId: string) => {
     if (blockIfOffline()) return;
     try {
@@ -446,9 +395,6 @@ function AppContent() {
       setGoals((prevGoals) => prevGoals.filter((g) => g.userId !== userId));
       setWorkoutDays((prevWorkouts) =>
         prevWorkouts.filter((w) => w.userId !== userId),
-      );
-      setWeeklyPlans((prevPlans) =>
-        prevPlans.filter((p) => p.userId !== userId),
       );
     } catch (error) {
       console.error("Error deleting user from database:", error);
@@ -537,10 +483,7 @@ function AppContent() {
                 users={users}
                 goals={goals}
                 workoutDays={workoutDays}
-                weeklyPlans={weeklyPlans}
-                challengeStartDate={adminSettings.challengeStartDate}
                 onUpdateWorkoutDay={updateWorkoutDay}
-                onUpdateWeeklyPlan={updateWeeklyPlan}
                 onAddGoal={addGoal}
                 onUpdateGoal={updateGoal}
                 onDeleteGoal={deleteGoal}

@@ -9,7 +9,6 @@ export interface ShareRow {
   name: string;
   cleanWeeks: number;
   outstanding: number;
-  standing: "active" | "suspended" | "out";
   potEligible: boolean;
 }
 
@@ -103,7 +102,7 @@ export const drawShareCard = (input: ShareCardInput): HTMLCanvasElement => {
     ctx.lineTo(width - pad, y - 14);
     ctx.stroke();
 
-    ctx.fillStyle = row.standing === "out" ? PALETTE.muted : PALETTE.ink;
+    ctx.fillStyle = PALETTE.ink;
     ctx.font = "600 17px system-ui, -apple-system, sans-serif";
     ctx.fillText(row.name, pad, y + 10);
 
@@ -111,10 +110,10 @@ export const drawShareCard = (input: ShareCardInput): HTMLCanvasElement => {
       ctx.fillStyle = PALETTE.clean;
       ctx.font = "600 11px system-ui, -apple-system, sans-serif";
       ctx.fillText("• in for the pot", pad + ctx.measureText(row.name).width + 44, y + 10);
-    } else if (row.standing !== "active") {
-      ctx.fillStyle = row.standing === "out" ? PALETTE.owed : PALETTE.skip;
+    } else if (row.outstanding > 0) {
+      ctx.fillStyle = PALETTE.owed;
       ctx.font = "600 11px system-ui, -apple-system, sans-serif";
-      ctx.fillText(row.standing.toUpperCase(), pad + ctx.measureText(row.name).width + 44, y + 10);
+      ctx.fillText("OWES", pad + ctx.measureText(row.name).width + 44, y + 10);
     }
 
     ctx.textAlign = "right";

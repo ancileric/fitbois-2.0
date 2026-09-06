@@ -3,8 +3,8 @@
  * FitBros 3.0 season engine.
  *
  * One rule owner for the whole season. Every derived fact — the price of a miss,
- * the fines, the standing, the pot — is replayed from the raw record of what a
- * player did, so there is no stored state to drift.
+ * the fines, the pot — is replayed from the raw record of what a player did, so
+ * there is no stored state to drift.
  *
  * Replaces consistencyCalculator.ts, which models the FitBois 2.0 rules
  * (a workload ladder scored on points). Both exist until the screens migrate.
@@ -33,21 +33,20 @@ const SEASON_WEEKS = 24;
 /** What the first miss costs. Every level after it doubles. */
 const FINE_BASE = 200;
 
+/**
+ * How long a fine has to be paid.
+ *
+ * Nothing is taken away when it passes — missing and owing no longer end a
+ * season — but the fine still has a date on it, and that date is a rule, so it
+ * lives here rather than in whichever file happens to write the row.
+ */
+const PAYMENT_GRACE_HOURS = 48;
+
 /** Misses at one price before it doubles; clean weeks in a row before it halves. */
 const WEEKS_TO_MOVE = 2;
 
 /** What a miss costs at a given level: 200, 400, 800, 1600 … */
 const fineAtLevel = (level) => FINE_BASE * 2 ** (Math.max(1, level) - 1);
-
-const MAX_SKIP_TOKENS = 3;
-const MAX_CONSECUTIVE_TOKENS = 2;
-
-/** Hours a fine may go unpaid before the player is suspended. */
-const PAYMENT_GRACE_HOURS = 48;
-
-/** Fines accumulated while suspended before elimination. */
-const FINES_TO_ELIMINATE = 2;
-
 
 /** A week's credit: sessions at 1, step days at a half. */
 const creditsIn = (userId, workoutDays, week) =>
@@ -58,14 +57,12 @@ const creditsIn = (userId, workoutDays, week) =>
 /**
  * Replay the season and derive everything from it.
  *
- * Order inside a week matters and mirrors the rules: a balance carried into a new
- * week is a balance past its 48 hours, so suspension is judged at the start of the
- * week, not the moment the fine lands.
+ * Every completed week is judged, always. Owing money changes what you are owed
+ * and whether you take a share of the pot — it never stops the season for you.
  */
 const runSeason = ({
   userId,
   workoutDays,
-  skipWeeks = [],
   settledWeeks = [],
   completedWeeks,
 }) => {
@@ -74,43 +71,16 @@ const runSeason = ({
   let missesAtLevel = 0;
   let cleanWeeks = 0;
   let missedWeeks = 0;
-  let tokensUsed = 0;
   let billed = 0;
   let paid = 0;
   let outstanding = 0;
-  let outstandingSince = null;
-  let finesWhileSuspended = 0;
-  let standing = 'active';
-  let suspendedAtWeek = null;
-  let outAtWeek = null;
 
   const weeks = [];
 
-  // The cap belongs to the rules, not to the API that hands out tokens: only the
-  // first three approved weeks waive a fine, the rest are ordinary missed weeks.
-  const honouredSkips = new Set(
-    [...new Set(skipWeeks)].sort((a, b) => a - b).slice(0, MAX_SKIP_TOKENS)
-  );
-
-  // Elimination breaks out of the loop below, so nothing after it is ever replayed:
-  // out is out, and the rest of the season doesn't happen.
   for (let week = 1; week <= completedWeeks; week++) {
-    // A balance that survived into this week has outlived its grace period.
-    if (outstanding > 0 && standing === 'active' && outstandingSince !== null && outstandingSince < week) {
-      standing = 'suspended';
-      suspendedAtWeek = week;
-    }
-
     const credits = creditsIn(userId, workoutDays, week);
-    const isClean = credits >= WORKOUTS_PER_WEEK;
-    const isSkipped = honouredSkips.has(week);
 
-    if (isSkipped && !isClean) {
-      // A token cancels the fine and leaves the ladder untouched: neither a
-      // clean week nor a missed one.
-      tokensUsed++;
-      weeks.push({ week, outcome: 'skipped', credits, priceLevel, fine: 0 });
-    } else if (isClean) {
+    if (credits >= WORKOUTS_PER_WEEK) {
       cleanWeeks++;
       cleanStreak++;
       weeks.push({ week, outcome: 'clean', credits, priceLevel, fine: 0 });
@@ -123,17 +93,8 @@ const runSeason = ({
       const fine = fineAtLevel(priceLevel);
       missedWeeks++;
       billed += fine;
-      if (outstanding === 0) outstandingSince = week;
       outstanding += fine;
       weeks.push({ week, outcome: 'missed', credits, priceLevel, fine });
-
-      if (standing === 'suspended') {
-        finesWhileSuspended++;
-        if (finesWhileSuspended >= FINES_TO_ELIMINATE) {
-          standing = 'out';
-          outAtWeek = week;
-        }
-      }
 
       cleanStreak = 0;
       missesAtLevel++;
@@ -143,18 +104,10 @@ const runSeason = ({
       }
     }
 
-    if (standing === 'out') break;
-
-    // Settling inside the week clears the balance and lifts a suspension.
+    // Settling inside the week clears the balance.
     if (settledWeeks.includes(week) && outstanding > 0) {
       paid += outstanding;
       outstanding = 0;
-      outstandingSince = null;
-      if (standing === 'suspended') {
-        standing = 'active';
-        suspendedAtWeek = null;
-        finesWhileSuspended = 0;
-      }
     }
   }
 
@@ -165,37 +118,15 @@ const runSeason = ({
     missedWeeks,
     cleanStreak,
     missesAtLevel,
-    tokensUsed,
     billed,
     paid,
     outstanding,
-    standing,
-    suspendedAtWeek,
-    outAtWeek,
-    potEligible: standing !== 'out' && outstanding === 0,
+    potEligible: outstanding === 0,
   };
 };
 
 /** What a miss costs this player right now. */
 const currentFine = (state) => fineAtLevel(state.priceLevel);
-
-/**
- * Why a skip token can't be used this week, or null when it can.
- * Rule 09: three a season, never three in a row, dead in the final two weeks.
- */
-const skipTokenBlocker = (week, seasonWeeks, usedWeeks) => {
-  if (!Number.isInteger(week) || week < 1 || week > seasonWeeks) {
-    return `Week ${week} isn't in the season — it runs weeks 1 to ${seasonWeeks}`;
-  }
-  if (usedWeeks.length >= MAX_SKIP_TOKENS) return 'All 3 skip tokens used';
-  if (week > seasonWeeks - 2) return 'Not usable in the final two weeks';
-
-  let consecutive = 0;
-  for (let w = week - 1; w >= 1 && usedWeeks.includes(w); w--) consecutive++;
-  if (consecutive >= MAX_CONSECUTIVE_TOKENS) return 'Never three in a row';
-
-  return null;
-};
 
 /**
  * Fines the app should be telling this player about: unsettled, newest first.
@@ -291,15 +222,11 @@ module.exports = {
   CREDIT_BY_KIND,
   SEASON_WEEKS,
   FINE_BASE,
+  PAYMENT_GRACE_HOURS,
   fineAtLevel,
   WEEKS_TO_MOVE,
-  MAX_SKIP_TOKENS,
-  MAX_CONSECUTIVE_TOKENS,
-  PAYMENT_GRACE_HOURS,
-  FINES_TO_ELIMINATE,
   runSeason,
   currentFine,
-  skipTokenBlocker,
   unpaidFines,
   goalSplitError,
   goalEligibilityError,

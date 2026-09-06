@@ -6,13 +6,7 @@ import { WORKOUTS_PER_WEEK } from "./seasonEngine";
  */
 type Tone = "owed" | "skip" | "clean";
 
-const nudge = (
-  done: number,
-  daysLeft: number,
-  outstanding = 0,
-  standing: "active" | "suspended" | "out" = "active"
-): Tone | null => {
-  if (standing === "out") return null;
+const nudge = (done: number, daysLeft: number, outstanding = 0): Tone | null => {
   if (outstanding > 0) return "owed";
   const left = WORKOUTS_PER_WEEK - done;
   if (left <= 0) return "clean";
@@ -43,7 +37,8 @@ describe("the weekly nudge", () => {
     expect(nudge(5, 4, 500)).toBe("owed");
   });
 
-  test("says nothing to an eliminated player", () => {
-    expect(nudge(0, 1, 1500, "out")).toBeNull();
+  test("money owed outranks the week — nobody is ever silenced now", () => {
+    expect(nudge(0, 1, 1500)).toBe("owed");
+    expect(nudge(5, 1, 1500)).toBe("owed");
   });
 });

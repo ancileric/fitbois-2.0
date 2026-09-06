@@ -36,14 +36,17 @@ confirmation, or he asks for options (give 2–4 ranked with trade-offs).
 A 24-week fitness accountability season for a group of friends, with real money
 attached. The rules are the product; the app only reports what the rules decide.
 
-- **A clean week is 5 workouts.** Flat, for everyone.
-- **A missed week costs money** — ₹500 → ₹1,000 → ₹2,000. Three misses at one
-  price raise it; three clean weeks lower it.
-- **Missing never eliminates you. Not paying does.** Active → Suspended (unpaid
-  past 48h) → Out (two fines while suspended). No buy-backs.
-- **The pot** splits between everyone still standing with nothing outstanding.
-  A fined week does not cost you a share.
+- **A clean week is 5 workouts' worth of credit.** A session is 1, a 10k-step day
+  is ½. A day logs once, so a week can never be walked clean (7 × ½ = 3.5).
+- **A missed week costs money** — ₹200 to start. Two misses at one price double
+  it (₹200, ₹400, ₹800, ₹1,600 …, no ceiling); two clean weeks in a row halve it.
+- **Nothing takes you out of the season.** No suspension, no elimination. A fine
+  has a 48-hour deadline, but missing it costs nothing beyond still owing.
+- **The pot** splits between everyone with nothing outstanding. A fined week does
+  not cost you a share; an unpaid one does.
 - **Goals:** 6 points across 2–6 goals, worth 3/2/1. Physical, numbered, provable.
+- **Gone deliberately:** skip tokens, weekly plans and swaps, the standing
+  machine. Sickness, injury and travel are handled between people, not in code.
 
 ## Architecture rules
 
@@ -56,6 +59,8 @@ attached. The rules are the product; the app only reports what the rules decide.
   stored state to drift.
 - **Fines are derived, then reconciled.** `syncFines` posts new ones and voids
   any whose week stopped being a miss.
+- **Every rule constant lives in the engine**, including the payment deadline.
+  A file that needs one imports it — no second copy in the server or a script.
 - Writes carry `x-player-id` and the server holds the caller to it. That is an
   ownership check, not authentication.
 - The season's current week comes from `admin_settings`, via `GET /api/settings`.
@@ -69,4 +74,4 @@ attached. The rules are the product; the app only reports what the rules decide.
 - Run `npx tsc --noEmit` before saying something is done.
 - Local dev: `nohup env PORT=5050 node backend/server.js &` and `npm start`.
   `node backend/scripts/seedFakeSeason.js` seeds nine players covering every
-  state the rules can produce.
+  state the rules can produce. It refuses to run against a Turso database.

@@ -4,14 +4,10 @@ import {
   Check,
   Footprints,
   IndianRupee,
-
   ShieldCheck,
-  Ticket,
   Trophy,
 } from "lucide-react";
-import { User, WeeklyPlan, WorkoutDay, WorkoutKind } from "../types";
-import WeeklyPlanModal from "./WeeklyPlanModal";
-import { getWeekDates } from "../utils/dateUtils";
+import { User, WorkoutDay, WorkoutKind } from "../types";
 import { apiFetch } from "../services/http";
 import { CREDIT_BY_KIND, SEASON_WEEKS } from "../utils/seasonEngine";
 
@@ -33,8 +29,6 @@ const NEXT_KIND: Record<string, WorkoutKind | null> = {
   steps: null,
 };
 
-type Standing = "active" | "suspended" | "out";
-
 interface UnsettledFine {
   id: string;
   week: number;
@@ -48,17 +42,15 @@ interface SeasonView {
   currentWeek: number;
   priceLevel: number;
   fineIfMissed: number;
-  standing: Standing;
   cleanWeeks: number;
   missedWeeks: number;
   cleanStreak: number;
   missesAtLevel: number;
-  tokensLeft: number;
   billed: number;
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  weeks: { week: number; outcome: "clean" | "missed"; credits: number; fine: number }[];
   currentWeekProgress: { week: number; credits: number; needed: number };
   unsettledFines: UnsettledFine[];
 }
@@ -66,32 +58,17 @@ interface SeasonView {
 interface MySeasonProps {
   currentUser: User | null;
   workoutDays: WorkoutDay[];
-  weeklyPlans: WeeklyPlan[];
   onUpdateWorkoutDay: (day: WorkoutDay) => void;
-  onUpdateWeeklyPlan: (plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: "user" | "admin";
-  }) => Promise<WeeklyPlan | undefined> | Promise<WeeklyPlan>;
-  challengeStartDate: string;
 }
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
-const STANDING_STYLE: Record<Standing, string> = {
-  active: "bg-clean-100 text-clean-700",
-  suspended: "bg-skip-100 text-skip-700",
-  out: "bg-owed-100 text-owed-700",
-};
-
 const OUTCOME_STYLE = {
   clean: "bg-clean-500",
   missed: "bg-owed-500",
-  skipped: "bg-skip-500",
 } as const;
 
-const OUTCOME_LABEL = { clean: "Clean", missed: "Fined", skipped: "Skipped" } as const;
+const OUTCOME_LABEL = { clean: "Clean", missed: "Fined" } as const;
 
 /** The season so far, plus the week still running, as one strip. */
 const WeekStrip: React.FC<{ view: SeasonView; compact?: boolean }> = ({ view, compact }) => (
@@ -136,15 +113,12 @@ const nudgeFor = (
   needed: number,
   daysLeft: number,
   fine: number,
-  outstanding: number,
-  standing: Standing
+  outstanding: number
 ): { tone: "owed" | "skip" | "clean"; text: string } | null => {
-  if (standing === "out") return null;
-
   if (outstanding > 0) {
     return {
       tone: "owed",
-      text: `${rupees(outstanding)} is due. Carry it into next week and you're suspended — no pot until you clear it.`,
+      text: `${rupees(outstanding)} is due. Clear it — nothing outstanding is what keeps you in for the pot.`,
     };
   }
 
@@ -170,12 +144,8 @@ const nudgeFor = (
 const MySeason: React.FC<MySeasonProps> = ({
   currentUser,
   workoutDays,
-  weeklyPlans,
   onUpdateWorkoutDay,
-  onUpdateWeeklyPlan,
-  challengeStartDate,
 }) => {
-  const [planOpen, setPlanOpen] = useState(false);
   const [players, setPlayers] = useState<SeasonView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +219,7 @@ const MySeason: React.FC<MySeasonProps> = ({
       timestamp: new Date().toISOString(),
     });
 
-    // The server re-derives fines and standing from the sheet.
+    // The server re-derives fines from the sheet.
     setTimeout(load, 400);
   };
 
@@ -276,8 +246,6 @@ const MySeason: React.FC<MySeasonProps> = ({
     );
   }
 
-  const thisWeekPlan =
-    weeklyPlans.find((p) => p.userId === currentUser?.id && p.week === me?.currentWeekProgress.week) ?? null;
   // 1 = Monday … 7 = Sunday, matching the week-end day locked at Week 0.
   const todayDow = ((new Date().getDay() + 6) % 7) + 1;
   const weekEndDay = currentUser?.weekEndDay ?? 7;
@@ -304,11 +272,6 @@ const MySeason: React.FC<MySeasonProps> = ({
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <h2 className="display text-3xl">{me.name}</h2>
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-[0.08em] ${STANDING_STYLE[me.standing]}`}
-                  >
-                    {me.standing}
-                  </span>
                   {me.potEligible ? (
                     <span className="flex items-center gap-1 text-xs font-medium text-clean-600">
                       <Trophy size={13} aria-hidden="true" /> in for the pot
@@ -328,7 +291,7 @@ const MySeason: React.FC<MySeasonProps> = ({
 
             {me
               ? (() => {
-                  const nudge = nudgeFor(done, needed, daysLeft, me.fineIfMissed, me.outstanding, me.standing);
+                  const nudge = nudgeFor(done, needed, daysLeft, me.fineIfMissed, me.outstanding);
                   if (!nudge) return null;
                   const tone = {
                     owed: "bg-owed-50 text-owed-700",
@@ -372,7 +335,6 @@ const MySeason: React.FC<MySeasonProps> = ({
                     <button
                       key={label}
                       onClick={() => cycleDay(dow)}
-                      disabled={me.standing === "out"}
                       aria-pressed={Boolean(kind)}
                       aria-label={`${label}: ${
                         kind === "session"
@@ -422,8 +384,8 @@ const MySeason: React.FC<MySeasonProps> = ({
               <dd className="display text-2xl tnum mt-0.5 text-ink">{rupees(me.paid)}</dd>
             </div>
             <div className="py-4 pr-4 sm:px-4 border-b border-line">
-              <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Skips left</dt>
-              <dd className="display text-2xl tnum mt-0.5 text-ink">{me.tokensLeft}</dd>
+              <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Fined weeks</dt>
+              <dd className="display text-2xl tnum mt-0.5 text-owed-600">{me.missedWeeks}</dd>
             </div>
           </dl>
 
@@ -440,31 +402,9 @@ const MySeason: React.FC<MySeasonProps> = ({
                 <i className="w-2.5 h-2.5 rounded-sm bg-owed-500" aria-hidden="true" /> {me.missedWeeks} fined
               </span>
               <span className="flex items-center gap-1.5">
-                <i className="w-2.5 h-2.5 rounded-sm bg-skip-500" aria-hidden="true" /> {3 - me.tokensLeft} skipped
-              </span>
-              <span className="flex items-center gap-1.5">
                 <i className="w-2.5 h-2.5 rounded-sm border-2 border-dashed border-ink-faint" aria-hidden="true" /> this week
               </span>
             </div>
-          </div>
-
-
-          {/* Rule 06: commit the days, and swap one if the week goes sideways. */}
-          <div className="pt-5 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-ink-muted">
-              {thisWeekPlan
-                ? `Committed to ${thisWeekPlan.committedDays.length} days${
-                    thisWeekPlan.swapsUsed ? " · swap spent" : " · one swap available"
-                  }`
-                : "No plan committed for this week"}
-            </p>
-            <button
-              onClick={() => setPlanOpen(true)}
-              className="min-h-[40px] px-3 border border-line rounded-lg text-xs font-semibold text-ink
-                         bg-paper-card cursor-pointer hover:border-clean-500 hover:text-clean-600"
-            >
-              {thisWeekPlan ? "Plan & swaps" : "Commit days"}
-            </button>
           </div>
 
           {/* Money you owe, and the one action that clears it. */}
@@ -492,7 +432,7 @@ const MySeason: React.FC<MySeasonProps> = ({
                   </span>
                   <button
                     onClick={() => call(`/fines/${f.id}/settle`)}
-                    disabled={busy || me.standing === "out"}
+                    disabled={busy}
                     className="min-h-[40px] px-4 bg-ink text-paper rounded-lg text-xs font-semibold cursor-pointer
                                disabled:opacity-35 disabled:cursor-not-allowed"
                   >
@@ -502,62 +442,16 @@ const MySeason: React.FC<MySeasonProps> = ({
               ))}
             </ul>
           ) : (
-            <div className="border-t border-line pt-4 mt-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="border-t border-line pt-4 mt-5">
               <span className="flex items-center gap-2 text-sm text-clean-600">
                 <ShieldCheck size={15} aria-hidden="true" /> Nothing outstanding
               </span>
-              <button
-                onClick={() =>
-                  call(`/skip-tokens`, {
-                    userId: me.userId,
-                    week: me.currentWeek + 1,
-                    approvedBy: "group",
-                  })
-                }
-                disabled={busy || me.tokensLeft === 0 || me.currentWeek + 1 > SEASON_WEEKS - 2}
-                className="flex items-center gap-1.5 min-h-[40px] px-3 border border-line rounded-lg text-xs font-semibold
-                           text-ink bg-paper-card cursor-pointer hover:border-skip-500 hover:text-skip-600
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Ticket size={14} aria-hidden="true" />
-                Skip next week ({me.tokensLeft} left)
-              </button>
             </div>
           )}
         </section>
       ) : null}
 
 
-      {planOpen && currentUser && me ? (
-        <WeeklyPlanModal
-          isOpen={planOpen}
-          onClose={() => setPlanOpen(false)}
-          user={currentUser}
-          week={me.currentWeekProgress.week}
-          weekDates={getWeekDates(challengeStartDate, me.currentWeekProgress.week)}
-          existingPlan={thisWeekPlan}
-          lockReason={thisWeekPlan ? "already-committed" : null}
-          swapsUsed={thisWeekPlan?.swapsUsed ?? 0}
-          onSave={async (days) => {
-            await onUpdateWeeklyPlan({
-              userId: currentUser.id,
-              week: me.currentWeekProgress.week,
-              committedDays: days,
-              createdBy: "user",
-            });
-            setPlanOpen(false);
-          }}
-          onSwap={async (from, to) => {
-            const res = await apiFetch(
-              `/weekly-plans/${currentUser.id}/${me.currentWeekProgress.week}/swap`,
-              { method: "POST", body: JSON.stringify({ from, to }) }
-            );
-            const body = await res.json().catch(() => ({}));
-            if (res.ok) load();
-            return res.ok ? null : body.error;
-          }}
-        />
-      ) : null}
     </div>
   );
 };

@@ -9,31 +9,27 @@ import { apiFetch } from "../services/http";
 import { SEASON_WEEKS } from "../utils/seasonEngine";
 
 /**
- * The group, at group scale: who is still standing, what the season has cost
- * everyone, and where the pot is heading.
+ * The group, at group scale: who is where, what the season has cost everyone,
+ * and where the pot is heading.
  *
  * Deliberately has no day-by-day logging. Logging is a personal act and lives on
  * My season; repeating it here only gave two places to read the same thing.
  */
 
 
-type Standing = "active" | "suspended" | "out";
-
 interface GroupRow {
   userId: string;
   name: string;
   currentWeek: number;
   fineIfMissed: number;
-  standing: Standing;
   cleanWeeks: number;
   missedWeeks: number;
   cleanStreak: number;
-  tokensLeft: number;
   billed: number;
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  weeks: { week: number; outcome: "clean" | "missed"; credits: number; fine: number }[];
   currentWeekProgress: { week: number; credits: number; needed: number };
 }
 
@@ -46,16 +42,9 @@ const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 /** Credit reads as 3 or 3.5, never 3.0. */
 const credit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-const STANDING_STYLE: Record<Standing, string> = {
-  active: "bg-clean-100 text-clean-700",
-  suspended: "bg-skip-100 text-skip-700",
-  out: "bg-owed-100 text-owed-700",
-};
-
 const OUTCOME_STYLE = {
   clean: "bg-clean-500",
   missed: "bg-owed-500",
-  skipped: "bg-skip-500",
 } as const;
 
 const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
@@ -85,8 +74,8 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
   }, [load]);
 
   /**
-   * Rule 11 order: still standing first, then who has kept the most weeks clean.
-   * Money owed breaks a tie, because it is what stands between you and the pot.
+   * Pot eligibility first, then who has kept the most weeks clean. Money owed
+   * breaks a tie, because it is what stands between you and the pot.
    */
   const ranked = useMemo(
     () =>
@@ -121,7 +110,6 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
           name: r.name,
           cleanWeeks: r.cleanWeeks,
           outstanding: r.outstanding,
-          standing: r.standing,
           potEligible: r.potEligible,
         })),
         potCount: rows.filter((r) => r.potEligible).length,
@@ -214,9 +202,9 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
             </dd>
           </div>
           <div className="py-4 pr-4 sm:px-4 border-b border-line">
-            <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Eliminated</dt>
+            <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Fined weeks</dt>
             <dd className="display text-3xl mt-1 tnum text-ink">
-              {rows.filter((r) => r.standing === "out").length}
+              {rows.reduce((sum, r) => sum + r.missedWeeks, 0)}
             </dd>
           </div>
         </dl>
@@ -242,11 +230,6 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
                         You
                       </span>
                     ) : null}
-                    <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-[0.08em] shrink-0 ${STANDING_STYLE[r.standing]}`}
-                    >
-                      {r.standing}
-                    </span>
                   </div>
                   <span
                     className={`tnum font-semibold shrink-0 ${r.outstanding ? "text-owed-600" : "text-clean-600"}`}
@@ -263,8 +246,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
                 </div>
 
                 <p className="text-xs text-ink-muted mt-2 tnum">
-                  {r.cleanWeeks} clean · {rupees(r.fineIfMissed)} a miss · {rupees(r.paid)} paid ·{" "}
-                  {r.tokensLeft} skips left
+                  {r.cleanWeeks} clean · {rupees(r.fineIfMissed)} a miss · {rupees(r.paid)} paid
                 </p>
                 </button>
               </li>
@@ -302,17 +284,12 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
                             You
                           </span>
                         ) : null}
-                        <span
-                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-[0.08em] ${STANDING_STYLE[r.standing]}`}
-                        >
-                          {r.standing}
-                        </span>
                         {r.potEligible ? (
                           <Trophy size={12} className="text-clean-600" aria-label="In for the pot" />
                         ) : null}
                       </div>
                       <p className="text-xs text-ink-muted mt-0.5 tnum">
-                        {r.cleanStreak} week streak · {r.tokensLeft} skips left
+                        {r.cleanStreak} week streak · {r.missedWeeks} fined
                       </p>
                     </td>
 
@@ -357,7 +334,7 @@ const GroupBoard: React.FC<GroupBoardProps> = ({ currentUser }) => {
 
       <section className="pt-2">
         <h3 className="display text-2xl mb-1">Lately</h3>
-        <p className="text-sm text-ink-muted mb-3">Fines, payments, skip tokens and goals as they land.</p>
+        <p className="text-sm text-ink-muted mb-3">Fines, payments and goals as they land.</p>
         <Feed currentUserId={currentUser?.id} />
       </section>
     </div>

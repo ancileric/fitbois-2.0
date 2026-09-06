@@ -13,7 +13,7 @@ const DDL = `
     price_level INTEGER NOT NULL DEFAULT 1,
     clean_weeks INTEGER NOT NULL DEFAULT 0,
     missed_weeks INTEGER NOT NULL DEFAULT 0,
-    standing TEXT NOT NULL DEFAULT 'active',
+    standing TEXT NOT NULL DEFAULT 'active', -- vestigial: nothing derives from it
     cutoff_hour INTEGER NOT NULL DEFAULT 0,
     week_end_day INTEGER NOT NULL DEFAULT 7,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -87,16 +87,6 @@ const DDL = `
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     UNIQUE(user_id, week)
   );
-  CREATE TABLE IF NOT EXISTS skip_tokens (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    week INTEGER NOT NULL,
-    requested_at TEXT NOT NULL,
-    approved_at TEXT,
-    approved_by TEXT,
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-    UNIQUE(user_id, week)
-  );
   CREATE TABLE IF NOT EXISTS proofs (
     id TEXT PRIMARY KEY,
     goal_id TEXT,
@@ -108,19 +98,6 @@ const DDL = `
     week INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE SET NULL
-  );
-  CREATE TABLE IF NOT EXISTS weekly_plans (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    week INTEGER NOT NULL,
-    committed_days TEXT NOT NULL,
-    committed_at TEXT NOT NULL,
-    created_by TEXT NOT NULL DEFAULT 'admin',
-    swaps_used INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-    UNIQUE(user_id, week)
   );
   CREATE TABLE IF NOT EXISTS admin_settings (
     id INTEGER PRIMARY KEY,
@@ -144,8 +121,6 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_petitions_goal ON petitions (goal_id);
   CREATE INDEX IF NOT EXISTS idx_fines_user ON fines (user_id);
   CREATE INDEX IF NOT EXISTS idx_fines_unsettled ON fines (user_id, settled_at);
-  CREATE INDEX IF NOT EXISTS idx_skip_tokens_user ON skip_tokens (user_id);
-  CREATE INDEX IF NOT EXISTS idx_weekly_plans_user ON weekly_plans (user_id);
 `;
 
 /**
@@ -168,7 +143,6 @@ const MIGRATIONS = [
   "ALTER TABLE fines ADD COLUMN settled_at TEXT",
   "ALTER TABLE fines ADD COLUMN waived_by_token_id TEXT",
   "ALTER TABLE workout_days ADD COLUMN kind TEXT NOT NULL DEFAULT 'session'",
-  "ALTER TABLE weekly_plans ADD COLUMN swaps_used INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE goals ADD COLUMN baseline_value REAL",
   "ALTER TABLE goals ADD COLUMN target_value REAL",
   "ALTER TABLE goals ADD COLUMN unit TEXT",

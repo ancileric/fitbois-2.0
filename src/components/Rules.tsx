@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { ALL_RULES, RULE_STAGES } from "../data/rules";
-import { fineAtLevel, MAX_SKIP_TOKENS, SEASON_WEEKS, WORKOUTS_PER_WEEK } from "../utils/seasonEngine";
+import { fineAtLevel, SEASON_WEEKS, WORKOUTS_PER_WEEK } from "../utils/seasonEngine";
 
 /**
  * The rules, in the app, so nobody has to go looking for the document.
@@ -18,7 +18,6 @@ const HEADLINES: [string, string][] = [
   ["A clean week", `${WORKOUTS_PER_WEEK} workouts`],
   ["10k steps", "half a workout"],
   ["A missed week", `from ${rupees(fineAtLevel(1))}, doubling`],
-  ["Skip tokens", `${MAX_SKIP_TOKENS} a season`],
   ["Season", `${SEASON_WEEKS} weeks`],
 ];
 
@@ -62,7 +61,7 @@ const Rules: React.FC = () => {
           What the group agreed before Week 0. Four stages, in the order the season runs.
         </p>
 
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border-t border-line mt-5 sm:divide-x divide-line">
+        <dl className="grid grid-cols-2 lg:grid-cols-4 border-t border-line mt-5 sm:divide-x divide-line">
           {HEADLINES.map(([label, value]) => (
             <div key={label} className="py-4 pr-4 sm:px-4 sm:first:pl-0 border-b border-line">
               <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">{label}</dt>
@@ -76,7 +75,7 @@ const Rules: React.FC = () => {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search the rules — fine, token, petition…"
+            placeholder="Search the rules — fine, goal, pot…"
             aria-label="Search the rules"
             className="w-full min-h-[44px] pl-10 pr-3 border border-line rounded-xl text-sm bg-paper-card
                        focus:ring-2 focus:ring-clean-500 focus:border-clean-500"
@@ -211,9 +210,8 @@ const Rules: React.FC = () => {
       })}
 
       <p className="text-xs text-ink-muted border-t border-line pt-4 max-w-[68ch]">
-        The season assumes {SEASON_WEEKS} weeks, that the miss count resets whenever the price of a
-        miss changes, and that a skip-token week is neutral — it neither breaks a clean streak nor
-        builds one.
+        The season assumes {SEASON_WEEKS} weeks, and that the miss count resets whenever the price
+        of a miss changes.
       </p>
     </div>
   );

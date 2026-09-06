@@ -7,6 +7,13 @@ const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const engine = require("../src/utils/seasonEngine");
 
+/**
+ * How long a fine has before it reads as overdue. The engine used to own this;
+ * it stopped being a rule input when standing was removed, so it lives here now
+ * — and defers to the engine if it ever exports it again.
+ */
+const { PAYMENT_GRACE_HOURS } = engine;
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -207,12 +214,6 @@ const getCurrentWeekIST = () => {
   return Math.floor(daysDiff / 7) + 1;
 };
 
-const currentISTDayOfWeek = () => {
-  const istNow = new Date(Date.now() + IST_OFFSET_MS);
-  const jsDow = istNow.getUTCDay();
-  return jsDow === 0 ? 7 : jsDow;
-};
-
 /**
  * The season's current week, from admin_settings — the same row the engine uses.
  * Date arithmetic used to answer this separately, which let the plan routes and
@@ -275,20 +276,6 @@ function denyUnlessOwner(req, res, ownerId) {
   return false;
 }
 
-/**
- * Rule 08: out is out for the season. Two fines while suspended ends it, and an
- * ended season can't be written to. The UI already hides these controls — this is
- * the server refusing to be told otherwise.
- */
-async function denyIfOut(res, userId) {
-  const row = await db.get("SELECT standing FROM users WHERE id = ?", [userId]);
-  if (row?.standing !== "out") return false;
-  res.status(403).json({
-    error: "Out for the season — two fines while suspended. No buy-backs, and nothing more to log.",
-  });
-  return true;
-}
-
 // ==================== USER ROUTES ====================
 
 app.get("/api/users", async (req, res) => {
@@ -296,7 +283,7 @@ app.get("/api/users", async (req, res) => {
     const rows = await db.all(`
       SELECT
         id, name, avatar, start_date, price_level,
-        clean_weeks, missed_weeks, standing,
+        clean_weeks, missed_weeks,
         cutoff_hour, week_end_day, created_at, updated_at
       FROM users
       ORDER BY name COLLATE NOCASE ASC
@@ -310,11 +297,10 @@ app.get("/api/users", async (req, res) => {
       priceLevel: Number(row.price_level),
       cleanWeeks: Number(row.clean_weeks),
       missedWeeks: Number(row.missed_weeks),
-      standing: row.standing,
       cutoffHour: Number(row.cutoff_hour),
       weekEndDay: Number(row.week_end_day),
-      // Only elimination makes a player inactive now.
-      isActive: row.standing !== "out",
+      // Missing never removes you from the season.
+      isActive: true,
     }));
 
     debug(`Fetched ${users.length} users`);
@@ -330,7 +316,7 @@ app.get("/api/users/:id", async (req, res) => {
     const row = await db.get(
       `SELECT
         id, name, avatar, start_date, price_level,
-        clean_weeks, missed_weeks, standing,
+        clean_weeks, missed_weeks,
         cutoff_hour, week_end_day, created_at, updated_at
       FROM users WHERE id = ?`,
       [req.params.id]
@@ -349,11 +335,10 @@ app.get("/api/users/:id", async (req, res) => {
       priceLevel: Number(row.price_level),
       cleanWeeks: Number(row.clean_weeks),
       missedWeeks: Number(row.missed_weeks),
-      standing: row.standing,
       cutoffHour: Number(row.cutoff_hour),
       weekEndDay: Number(row.week_end_day),
-      // Only elimination makes a player inactive now.
-      isActive: row.standing !== "out",
+      // Missing never removes you from the season.
+      isActive: true,
     };
 
     res.json(user);
@@ -425,8 +410,8 @@ app.post("/api/users", async (req, res) => {
     await db.run(
       `INSERT INTO users (
         id, name, avatar, start_date, price_level,
-        clean_weeks, missed_weeks, standing, cutoff_hour, week_end_day
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        clean_weeks, missed_weeks, cutoff_hour, week_end_day
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sanitizedName,
@@ -435,7 +420,6 @@ app.post("/api/users", async (req, res) => {
         priceLevel || 1,
         cleanWeeks || 0,
         missedWeeks || 0,
-        "active",
         cutoffHour ?? 0,
         weekEndDay ?? 7,
       ]
@@ -451,7 +435,6 @@ app.post("/api/users", async (req, res) => {
       priceLevel: priceLevel || 1,
       cleanWeeks: cleanWeeks || 0,
       missedWeeks: missedWeeks || 0,
-      standing: "active",
       isActive: true,
     };
 
@@ -470,10 +453,8 @@ app.put("/api/users/:id", async (req, res) => {
     priceLevel,
     cleanWeeks,
     missedWeeks,
-    standing,
     cutoffHour,
     weekEndDay,
-    isActive,
   } = req.body;
 
   const nameError = validateString(name, "Name", 1, 100);
@@ -520,7 +501,7 @@ app.put("/api/users/:id", async (req, res) => {
     // undefined straight through used to fail the whole request.
     const existing = await db.get(
       `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks,
-              standing, cutoff_hour, week_end_day
+              cutoff_hour, week_end_day
          FROM users WHERE id = ?`,
       [req.params.id]
     );
@@ -536,8 +517,6 @@ app.put("/api/users/:id", async (req, res) => {
     const nextPriceLevel = priceLevel ?? Number(existing.price_level);
     const nextCleanWeeks = cleanWeeks ?? Number(existing.clean_weeks);
     const nextMissedWeeks = missedWeeks ?? Number(existing.missed_weeks);
-    const nextStanding =
-      standing || (isActive === false ? "out" : existing.standing || "active");
     const nextCutoffHour = cutoffHour ?? Number(existing.cutoff_hour);
     const nextWeekEndDay = weekEndDay ?? Number(existing.week_end_day);
 
@@ -548,7 +527,6 @@ app.put("/api/users/:id", async (req, res) => {
         price_level = ?,
         clean_weeks = ?,
         missed_weeks = ?,
-        standing = ?,
         cutoff_hour = ?,
         week_end_day = ?,
         updated_at = CURRENT_TIMESTAMP
@@ -559,7 +537,6 @@ app.put("/api/users/:id", async (req, res) => {
         nextPriceLevel,
         nextCleanWeeks,
         nextMissedWeeks,
-        nextStanding,
         nextCutoffHour,
         nextWeekEndDay,
         req.params.id,
@@ -581,10 +558,9 @@ app.put("/api/users/:id", async (req, res) => {
       priceLevel: nextPriceLevel,
       cleanWeeks: nextCleanWeeks,
       missedWeeks: nextMissedWeeks,
-      standing: nextStanding,
       cutoffHour: nextCutoffHour,
       weekEndDay: nextWeekEndDay,
-      isActive: nextStanding !== "out",
+      isActive: true,
     };
 
     res.json(user);
@@ -795,8 +771,6 @@ app.post("/api/workouts", async (req, res) => {
       });
       return;
     }
-
-    if (await denyIfOut(res, userId)) return;
 
     const existingRow = await db.get(
       `SELECT id FROM workout_days WHERE user_id = ? AND week = ? AND day_of_week = ?`,
@@ -1466,288 +1440,6 @@ app.get("/api/goals/stats/:userId", async (req, res) => {
   }
 });
 
-// ==================== WEEKLY PLANS ROUTES ====================
-
-const serializeWeeklyPlan = (row) => {
-  let committedDays = [];
-  try {
-    const parsed = JSON.parse(row.committed_days);
-    if (Array.isArray(parsed)) committedDays = parsed.map((d) => Number(d));
-  } catch (e) {
-    committedDays = [];
-  }
-  return {
-    id: row.id,
-    userId: row.user_id,
-    week: row.week,
-    committedDays,
-    committedAt: row.committed_at,
-    createdBy: row.created_by,
-    swapsUsed: Number(row.swaps_used || 0),
-  };
-};
-
-app.get("/api/weekly-plans", async (req, res) => {
-  try {
-    const rows = await db.all(
-      `SELECT * FROM weekly_plans ORDER BY week DESC, user_id`
-    );
-    const plans = rows.map(serializeWeeklyPlan);
-    debug(`Fetched ${plans.length} weekly plans`);
-    res.json(plans);
-  } catch (err) {
-    console.error("Error fetching weekly plans:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/weekly-plans/:userId/:week", async (req, res) => {
-  const userId = req.params.userId;
-  const week = Number(req.params.week);
-  if (!Number.isInteger(week) || week < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
-
-  try {
-    const row = await db.get(
-      `SELECT * FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, week]
-    );
-
-    if (!row) {
-      res.status(404).json({ error: "Weekly plan not found" });
-      return;
-    }
-
-    res.json(serializeWeeklyPlan(row));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/weekly-plans", async (req, res) => {
-  const { userId, week, committedDays, createdBy, override } = req.body;
-
-  if (!userId || typeof userId !== "string") {
-    res.status(400).json({ error: "userId is required" });
-    return;
-  }
-  if (denyUnlessOwner(req, res, userId)) return;
-
-  const weekNum = Number(week);
-  if (!Number.isInteger(weekNum) || weekNum < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
-  if (!Array.isArray(committedDays) || committedDays.length === 0) {
-    res.status(400).json({ error: "committedDays must be a non-empty array" });
-    return;
-  }
-  const daysAsNumbers = committedDays.map((d) => Number(d));
-  for (const d of daysAsNumbers) {
-    if (!Number.isInteger(d) || d < 1 || d > 7) {
-      res
-        .status(400)
-        .json({ error: "committedDays must be integers in 1-7 (Mon-Sun)" });
-      return;
-    }
-  }
-  const uniqueDays = [...new Set(daysAsNumbers)];
-  if (uniqueDays.length !== daysAsNumbers.length) {
-    res.status(400).json({ error: "committedDays must be unique" });
-    return;
-  }
-  uniqueDays.sort((a, b) => a - b);
-  const validCreatedBy = ["user", "admin"].includes(createdBy)
-    ? createdBy
-    : "admin";
-  const isAdminOverride = validCreatedBy === "admin" && override === true;
-
-  try {
-    const user = await db.get(
-      `SELECT id, price_level, standing FROM users WHERE id = ?`,
-      [userId]
-    );
-
-    if (!user) {
-      res.status(404).json({ error: `User ${userId} not found` });
-      return;
-    }
-    if (await denyIfOut(res, userId)) return;
-
-    const required = engine.WORKOUTS_PER_WEEK;
-    if (uniqueDays.length < required) {
-      res.status(400).json({
-        error: `A clean week is ${required} workouts, so commit to at least ${required} days`,
-      });
-      return;
-    }
-
-    const currentWeek = await seasonCurrentWeek();
-    if (!isAdminOverride && currentWeek > 0 && weekNum < currentWeek) {
-      res
-        .status(400)
-        .json({ error: "Cannot submit a plan for a past week" });
-      return;
-    }
-
-    const existing = await db.get(
-      `SELECT id, committed_at, swaps_used FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, weekNum]
-    );
-
-    // The week you are in can be planned, but only once: after that Rule 06 owns
-    // the changes, so rewriting the plan cannot be used to dodge the one swap.
-    if (!isAdminOverride && existing && weekNum === currentWeek) {
-      res.status(403).json({
-        error: "Your plan for this week is already set — move a day with your swap",
-        lockReason: "already-committed",
-      });
-      return;
-    }
-
-    const id = existing?.id || uuidv4();
-    const committedAt = existing?.committed_at || new Date().toISOString();
-    const swapsUsed = Number(existing?.swaps_used || 0);
-
-    // Upsert, not INSERT OR REPLACE: re-committing must not hand back a spent swap.
-    await db.run(
-      `INSERT INTO weekly_plans (
-        id, user_id, week, committed_days, committed_at, created_by, swaps_used, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_id, week) DO UPDATE SET
-        committed_days = excluded.committed_days,
-        created_by = excluded.created_by,
-        updated_at = CURRENT_TIMESTAMP`,
-      [id, userId, weekNum, JSON.stringify(uniqueDays), committedAt, validCreatedBy]
-    );
-
-    debug(
-      `Upserted weekly plan for user ${userId}, week ${weekNum}, days [${uniqueDays.join(",")}]`
-    );
-
-    res.json({
-      id,
-      userId,
-      week: weekNum,
-      committedDays: uniqueDays,
-      committedAt,
-      createdBy: validCreatedBy,
-      swapsUsed,
-    });
-  } catch (err) {
-    console.error("Error upserting weekly plan:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/weekly-plans/:userId/:week", async (req, res) => {
-  const userId = req.params.userId;
-  const week = Number(req.params.week);
-  if (!Number.isInteger(week) || week < 1) {
-    res.status(400).json({ error: "week must be a positive integer" });
-    return;
-  }
-  if (denyUnlessOwner(req, res, userId)) return;
-
-  try {
-    // Rule 06 again: dropping a live plan and re-committing would hand back the
-    // swap you already spent, so only weeks that have not started can be deleted.
-    const currentWeek = await seasonCurrentWeek();
-    if (!isAdminRequest(req) && week <= currentWeek) {
-      res.status(403).json({
-        error: "That week is under way — move a day with your swap instead of dropping the plan",
-        lockReason: "already-committed",
-      });
-      return;
-    }
-
-    const result = await db.run(
-      `DELETE FROM weekly_plans WHERE user_id = ? AND week = ?`,
-      [userId, week]
-    );
-
-    if (result.changes === 0) {
-      res.status(404).json({ error: "Weekly plan not found" });
-      return;
-    }
-
-    debug(`Deleted weekly plan for user ${userId}, week ${week}`);
-    res.json({ message: "Weekly plan deleted" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Rule 06: one swap a week, applied before the day starts.
-app.post("/api/weekly-plans/:userId/:week/swap", async (req, res) => {
-  try {
-    const { userId, week } = req.params;
-    const from = Number(req.body.from);
-    const to = Number(req.body.to);
-
-    if (![from, to].every((d) => Number.isInteger(d) && d >= 1 && d <= 7)) {
-      res.status(400).json({ error: "from and to must be days 1-7" });
-      return;
-    }
-    if (from === to) {
-      res.status(400).json({ error: "Pick a different day to move it to" });
-      return;
-    }
-
-    if (denyUnlessOwner(req, res, userId)) return;
-    if (await denyIfOut(res, userId)) return;
-
-    const plan = await db.get(
-      "SELECT id, committed_days, swaps_used FROM weekly_plans WHERE user_id = ? AND week = ?",
-      [userId, Number(week)]
-    );
-    if (!plan) {
-      res.status(404).json({ error: "No plan for that week" });
-      return;
-    }
-    if (Number(plan.swaps_used) >= 1) {
-      res.status(400).json({ error: "One swap a week, and this week's is spent" });
-      return;
-    }
-
-    const committed = JSON.parse(plan.committed_days);
-    if (!committed.includes(from)) {
-      res.status(400).json({ error: "That day isn't in your plan" });
-      return;
-    }
-    if (committed.includes(to)) {
-      res.status(400).json({ error: "You're already committed to that day" });
-      return;
-    }
-
-    // Before the day starts, never after — for both the day being dropped and the one taking it.
-    const currentWeek = await seasonCurrentWeek();
-    if (Number(week) === currentWeek) {
-      const today = currentISTDayOfWeek();
-      if (from <= today || to <= today) {
-        res.status(400).json({ error: "Swaps apply before the day starts, never after" });
-        return;
-      }
-    } else if (Number(week) < currentWeek) {
-      res.status(400).json({ error: "That week is already closed" });
-      return;
-    }
-
-    const swapped = committed.filter((d) => d !== from).concat(to).sort((a, b) => a - b);
-    await db.run(
-      "UPDATE weekly_plans SET committed_days = ?, swaps_used = swaps_used + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [JSON.stringify(swapped), plan.id]
-    );
-
-    debug(`Swap for ${userId} week ${week}: day ${from} -> ${to}`);
-    res.json({ userId, week: Number(week), committedDays: swapped, swapsUsed: Number(plan.swaps_used) + 1 });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get("/api/settings", async (req, res) => {
   try {
     const row = await db.get(
@@ -1771,7 +1463,7 @@ app.get("/api/settings", async (req, res) => {
 /**
  * Move the season on.
  *
- * `current_week` is the season's clock: every fine, price level and standing is
+ * `current_week` is the season's clock: every fine and price level is
  * replayed against it, and nothing was able to write it. Advancing closes the
  * week that just ended, so the fines it produced are posted here — by the same
  * `syncFines` the rest of the app uses, never by rule logic copied into a route.
@@ -1847,11 +1539,11 @@ app.put("/api/settings", async (req, res) => {
     const results = [];
     if (to !== from) {
       try {
-        const players = await db.all("SELECT id, name FROM users WHERE standing != 'out'");
+        const players = await db.all("SELECT id, name FROM users");
         for (const player of players) {
-          const { issued, voided, state } = await syncFines(player.id);
+          const { issued, voided } = await syncFines(player.id);
           if (issued.length || voided.length) {
-            results.push({ userId: player.id, name: player.name, issued, voided, standing: state.standing });
+            results.push({ userId: player.id, name: player.name, issued, voided });
           }
         }
       } catch (err) {
@@ -1987,10 +1679,9 @@ app.post("/api/goals/:id/progress", async (req, res) => {
 app.get("/api/feed", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 40, 100);
-    const [users, fines, tokens, goals, progress] = await Promise.all([
+    const [users, fines, goals, progress] = await Promise.all([
       db.all("SELECT id, name, avatar FROM users"),
       db.all("SELECT user_id, week, amount, price_level, issued_at, settled_at FROM fines WHERE voided_at IS NULL"),
-      db.all("SELECT user_id, week, approved_at FROM skip_tokens WHERE approved_at IS NOT NULL"),
       db.all("SELECT id, user_id, description, points, completed_date FROM goals WHERE is_completed = 1"),
       db.all(
         `SELECT p.user_id, p.value, p.recorded_at, g.description, g.unit, g.baseline_value, g.target_value
@@ -2021,16 +1712,6 @@ app.get("/api/feed", async (req, res) => {
           amount: Number(f.amount),
         });
       }
-    }
-
-    for (const t of tokens) {
-      events.push({
-        kind: "token",
-        userId: t.user_id,
-        name: nameOf.get(t.user_id),
-        at: t.approved_at,
-        text: `used a skip token for week ${t.week}`,
-      });
     }
 
     for (const g of goals) {
@@ -2070,19 +1751,18 @@ app.get("/api/feed", async (req, res) => {
   }
 });
 
-// ==================== SEASON, FINES & SKIP TOKENS ====================
+// ==================== SEASON & FINES ====================
 
 /**
  * Everything the season engine needs about one player, read from the raw record.
  * Fines are derived, never trusted from a stored column — the sheet is the truth.
  */
 async function loadSeason(userId) {
-  const [workoutRows, tokenRows, fineRows, settings] = await Promise.all([
+  const [workoutRows, fineRows, settings] = await Promise.all([
     db.all(
       "SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days WHERE user_id = ?",
       [userId]
     ),
-    db.all("SELECT week FROM skip_tokens WHERE user_id = ? AND approved_at IS NOT NULL", [userId]),
     db.all("SELECT week, settled_at FROM fines WHERE user_id = ? AND voided_at IS NULL", [userId]),
     db.get("SELECT current_week FROM admin_settings WHERE id = 1"),
   ]);
@@ -2100,7 +1780,6 @@ async function loadSeason(userId) {
   const state = engine.runSeason({
     userId,
     workoutDays,
-    skipWeeks: tokenRows.map((r) => Number(r.week)),
     settledWeeks: fineRows.filter((r) => r.settled_at).map((r) => Number(r.week)),
     completedWeeks: Math.max(0, currentWeek - 1),
   });
@@ -2120,7 +1799,7 @@ async function syncFines(userId) {
   );
   const known = new Set(existing.map((r) => Number(r.week)));
 
-  // A week that is no longer a miss — logged late, or covered by a token — must
+  // A week that is no longer a miss — logged late, say — must
   // stop being billed. Otherwise the fines list demands money the season doesn't.
   const stillFined = new Map(state.weeks.filter((w) => w.fine > 0).map((w) => [w.week, w.fine]));
   const voided = [];
@@ -2149,7 +1828,7 @@ async function syncFines(userId) {
   for (const week of state.weeks) {
     if (week.fine <= 0 || known.has(week.week)) continue;
     const now = new Date();
-    const due = new Date(now.getTime() + engine.PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
+    const due = new Date(now.getTime() + PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
     // One row per player-week, forever (UNIQUE(user_id, week)). A week that was
     // voided and then became a miss again — the season moved back and forward,
     // or a logged day was undone — has to revive that row, not insert a second.
@@ -2170,8 +1849,8 @@ async function syncFines(userId) {
 
   // Keep the player row in step with what the replay says.
   await db.run(
-    "UPDATE users SET price_level = ?, clean_weeks = ?, missed_weeks = ?, standing = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    [state.priceLevel, state.cleanWeeks, state.missedWeeks, state.standing, userId]
+    "UPDATE users SET price_level = ?, clean_weeks = ?, missed_weeks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [state.priceLevel, state.cleanWeeks, state.missedWeeks, userId]
   );
 
   return { issued, voided, state };
@@ -2188,14 +1867,10 @@ function seasonView(user, { state, currentWeek, workoutRows }, unsettled) {
     currentWeek,
     priceLevel: state.priceLevel,
     fineIfMissed: engine.currentFine(state),
-    standing: state.standing,
-    suspendedAtWeek: state.suspendedAtWeek,
-    outAtWeek: state.outAtWeek,
     cleanWeeks: state.cleanWeeks,
     missedWeeks: state.missedWeeks,
     cleanStreak: state.cleanStreak,
     missesAtLevel: state.missesAtLevel,
-    tokensLeft: engine.MAX_SKIP_TOKENS - state.tokensUsed,
     billed: state.billed,
     paid: state.paid,
     outstanding: state.outstanding,
@@ -2238,10 +1913,9 @@ const groupByUser = (rows) => {
 // five table reads instead of five per player — Turso charges a round trip each.
 app.get("/api/seasons", async (req, res) => {
   try {
-    const [users, workoutRows, tokenRows, fineRows, settings] = await Promise.all([
+    const [users, workoutRows, fineRows, settings] = await Promise.all([
       db.all("SELECT id, name FROM users ORDER BY name COLLATE NOCASE ASC"),
       db.all("SELECT user_id, week, day_of_week, is_completed, kind FROM workout_days"),
-      db.all("SELECT user_id, week FROM skip_tokens WHERE approved_at IS NOT NULL"),
       db.all(
         `SELECT user_id, id, week, amount, settled_at, issued_at, due_at
          FROM fines WHERE voided_at IS NULL ORDER BY week DESC`
@@ -2252,7 +1926,6 @@ app.get("/api/seasons", async (req, res) => {
     const currentWeek = settings ? Number(settings.current_week) : 1;
     const completedWeeks = Math.max(0, currentWeek - 1);
     const workoutsByUser = groupByUser(workoutRows);
-    const tokensByUser = groupByUser(tokenRows);
     const finesByUser = groupByUser(fineRows);
 
     res.json(
@@ -2267,10 +1940,8 @@ app.get("/api/seasons", async (req, res) => {
             week: Number(r.week),
             dayOfWeek: Number(r.day_of_week),
             kind: r.kind || "session",
-    kind: r.kind || "session",
             isCompleted: Boolean(r.is_completed),
           })),
-          skipWeeks: (tokensByUser.get(user.id) || []).map((r) => Number(r.week)),
           settledWeeks: fines.filter((r) => r.settled_at).map((r) => Number(r.week)),
           completedWeeks,
         });
@@ -2314,12 +1985,12 @@ app.post("/api/fines/sync", async (req, res) => {
   try {
     const userIds = req.body.userId
       ? [req.body.userId]
-      : (await db.all("SELECT id FROM users WHERE standing != 'out'")).map((r) => r.id);
+      : (await db.all("SELECT id FROM users")).map((r) => r.id);
 
     const results = [];
     for (const userId of userIds) {
       const { issued, voided, state } = await syncFines(userId);
-      results.push({ userId, issued, voided, standing: state.standing, outstanding: state.outstanding });
+      results.push({ userId, issued, voided, outstanding: state.outstanding });
     }
 
     const total = results.reduce((n, r) => n + r.issued.length, 0);
@@ -2368,7 +2039,7 @@ app.get("/api/fines", async (req, res) => {
   }
 });
 
-// Settling clears the balance and, with it, a suspension.
+// Settling clears the balance, and with it the pot eligibility it was blocking.
 app.post("/api/fines/:id/settle", async (req, res) => {
   try {
     const fine = await db.get("SELECT id, user_id, settled_at FROM fines WHERE id = ?", [req.params.id]);
@@ -2377,7 +2048,6 @@ app.post("/api/fines/:id/settle", async (req, res) => {
       return;
     }
     if (denyUnlessOwner(req, res, fine.user_id)) return;
-    if (await denyIfOut(res, fine.user_id)) return;
     if (fine.settled_at) {
       res.status(409).json({ error: "Fine already settled" });
       return;
@@ -2386,57 +2056,8 @@ app.post("/api/fines/:id/settle", async (req, res) => {
     await db.run("UPDATE fines SET settled_at = ? WHERE id = ?", [new Date().toISOString(), req.params.id]);
     const { state } = await syncFines(fine.user_id);
 
-    res.json({ message: "Fine settled", standing: state.standing, outstanding: state.outstanding });
+    res.json({ message: "Fine settled", outstanding: state.outstanding });
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Rule 09: three a season, never three in a row, dead in the final two weeks.
-app.post("/api/skip-tokens", async (req, res) => {
-  try {
-    const { userId, week, approvedBy } = req.body;
-    if (!userId || !week) {
-      res.status(400).json({ error: "userId and week are required" });
-      return;
-    }
-    if (denyUnlessOwner(req, res, userId)) return;
-    if (await denyIfOut(res, userId)) return;
-
-    const used = await db.all(
-      "SELECT week FROM skip_tokens WHERE user_id = ? AND approved_at IS NOT NULL",
-      [userId]
-    );
-    const settings = await db.get("SELECT current_week FROM admin_settings WHERE id = 1");
-    const seasonWeeks = engine.SEASON_WEEKS;
-
-    const blocker = engine.skipTokenBlocker(
-      Number(week),
-      seasonWeeks,
-      used.map((r) => Number(r.week))
-    );
-    if (blocker) {
-      res.status(400).json({ error: blocker });
-      return;
-    }
-    if (settings && Number(week) < Number(settings.current_week)) {
-      res.status(400).json({ error: "Appeal before your week starts" });
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const id = uuidv4();
-    await db.run(
-      "INSERT INTO skip_tokens (id, user_id, week, requested_at, approved_at, approved_by) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, userId, Number(week), now, approvedBy ? now : null, approvedBy || null]
-    );
-
-    res.status(201).json({ id, userId, week: Number(week), approvedBy: approvedBy || null });
-  } catch (err) {
-    if (String(err.message).includes("UNIQUE")) {
-      res.status(409).json({ error: "A skip token already exists for that week" });
-      return;
-    }
     res.status(500).json({ error: err.message });
   }
 });

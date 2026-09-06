@@ -6,8 +6,8 @@ import { apiFetch, latestGoalReadings } from "../services/http";
 /**
  * One player's season, opened from the group list.
  *
- * Read-only by design: you can see anyone's record, but Rule 04 and Rule 05 keep
- * the editing to the person it belongs to.
+ * Read-only by design: you can see anyone's record, but the logging stays with
+ * the person it belongs to.
  */
 
 
@@ -16,16 +16,14 @@ interface Season {
   name: string;
   currentWeek: number;
   fineIfMissed: number;
-  standing: "active" | "suspended" | "out";
   cleanWeeks: number;
   missedWeeks: number;
   cleanStreak: number;
-  tokensLeft: number;
   billed: number;
   paid: number;
   outstanding: number;
   potEligible: boolean;
-  weeks: { week: number; outcome: "clean" | "missed" | "skipped"; credits: number; fine: number }[];
+  weeks: { week: number; outcome: "clean" | "missed"; credits: number; fine: number }[];
   currentWeekProgress: { week: number; credits: number; needed: number };
 }
 
@@ -37,7 +35,6 @@ const credit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const OUTCOME_STYLE = {
   clean: "bg-clean-500",
   missed: "bg-owed-500",
-  skipped: "bg-skip-500",
 } as const;
 
 const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId, onClose }) => {
@@ -96,9 +93,7 @@ const PlayerSheet: React.FC<{ userId: string; onClose: () => void }> = ({ userId
               <div>
                 <h2 className="display text-3xl">{season.name}</h2>
                 <p className="text-sm text-ink-muted mt-0.5">
-                  {season.standing === "out"
-                    ? "Out for the season"
-                    : `${rupees(season.fineIfMissed)} a missed week · ${season.tokensLeft} skips left`}
+                  {rupees(season.fineIfMissed)} a missed week · {season.cleanStreak} week streak
                 </p>
               </div>
               <button

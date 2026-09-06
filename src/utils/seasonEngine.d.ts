@@ -9,8 +9,7 @@ import { WorkoutDay, WorkoutKind } from '../types';
 
 /** The ladder has no ceiling: every two misses doubles the price. */
 export type PriceLevel = number;
-export type Standing = 'active' | 'suspended' | 'out';
-export type WeekOutcome = 'clean' | 'missed' | 'skipped';
+export type WeekOutcome = 'clean' | 'missed';
 
 export interface WeekResult {
   week: number;
@@ -19,7 +18,7 @@ export interface WeekResult {
   credits: number;
   /** The price level this week was judged at. */
   priceLevel: PriceLevel;
-  /** Amount fined for this week, 0 when clean or covered by a token. */
+  /** Amount fined for this week, 0 when clean. */
   fine: number;
 }
 
@@ -32,25 +31,19 @@ export interface SeasonState {
   cleanStreak: number;
   /** Misses at the current price, toward raising it. */
   missesAtLevel: number;
-  tokensUsed: number;
   /** Total fined across the season, settled or not. */
   billed: number;
   /** Settled so far. */
   paid: number;
   /** Owed right now. */
   outstanding: number;
-  standing: Standing;
-  suspendedAtWeek: number | null;
-  outAtWeek: number | null;
-  /** Rule 11: still standing with nothing owed. */
+  /** Rule 11: nothing owed. */
   potEligible: boolean;
 }
 
 export interface SeasonInput {
   userId: string;
   workoutDays: WorkoutDay[];
-  /** Weeks covered by an approved skip token. */
-  skipWeeks?: number[];
   /** Weeks whose fine has been settled. */
   settledWeeks?: number[];
   /** Weeks completed so far; the in-progress week is not judged. */
@@ -65,20 +58,15 @@ export const CREDIT_BY_KIND: Record<WorkoutKind, number>;
 export const SEASON_WEEKS: 24;
 /** What the first miss costs. Every level after it doubles. */
 export const FINE_BASE: 200;
+/** How long a fine has to be paid. Nothing is taken away when it passes. */
+export const PAYMENT_GRACE_HOURS: 48;
 /** What a miss costs at a level: 200, 400, 800, 1600 … */
 export function fineAtLevel(level: number): number;
 /** Misses at one price before it doubles; clean weeks in a row before it halves. */
 export const WEEKS_TO_MOVE: 2;
-export const MAX_SKIP_TOKENS: 3;
-export const MAX_CONSECUTIVE_TOKENS: 2;
-/** Hours a fine may go unpaid before the player is suspended. */
-export const PAYMENT_GRACE_HOURS: 48;
-/** Fines accumulated while suspended before elimination. */
-export const FINES_TO_ELIMINATE: 2;
 
 export function runSeason(input: SeasonInput): SeasonState;
 export function currentFine(state: SeasonState): number;
-export function skipTokenBlocker(week: number, seasonWeeks: number, usedWeeks: number[]): string | null;
 export function unpaidFines(state: SeasonState, settledWeeks?: number[]): WeekResult[];
 export function goalSplitError(points: number[]): string | null;
 /** Rule 01: physical output, measured by a number, provable. Null when eligible. */

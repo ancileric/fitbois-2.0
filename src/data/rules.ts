@@ -5,8 +5,8 @@
  * document cannot drift into saying different things. If a rule changes, it
  * changes in both places together.
  *
- * `ties` records which other rules a rule leans on — Rule 07 (fines) is only
- * legible next to Rule 08 (standing), and the app should let people follow that.
+ * `ties` records which other rules a rule leans on — Rule 06 (fines) is only
+ * legible next to Rule 05 (logging), and the app should let people follow that.
  */
 
 export interface Rule {
@@ -115,9 +115,7 @@ export const RULE_STAGES: RuleStage[] = [
         "number": "04",
         "title": "Changing a goal",
         "summary": "Only once you've completed it. Group votes.",
-        "paragraphs": [
-          "Suspended players can't petition — see Rule 08."
-        ],
+        "paragraphs": [],
         "points": [
           "Petition the group, set a meeting time",
           "Only people who attend get a vote",
@@ -127,8 +125,7 @@ export const RULE_STAGES: RuleStage[] = [
         "table": [],
         "ties": [
           "r1",
-          "r2",
-          "r8"
+          "r2"
         ],
         "hasDefault": true
       }
@@ -136,7 +133,7 @@ export const RULE_STAGES: RuleStage[] = [
   },
   {
     "name": "Week to week",
-    "span": "Rules 05–06",
+    "span": "Rule 05",
     "blurb": "What you do, and how it gets recorded. This is what decides whether a week is clean.",
     "rules": [
       {
@@ -147,7 +144,7 @@ export const RULE_STAGES: RuleStage[] = [
         "paragraphs": [
           "One sheet, single source of truth. A session counts if logged before your cutoff on the day you did it. Hevy, Strava, Apple Watch, Google Fit, timestamped photo — all accepted.",
           "Whatever you send counts as a workout. A 10k-step day counts as half of one, so two of them make a workout — and since a day is logged once, a week can never be walked clean.",
-          "Your cutoff and week-end day come from Week 0, and the sheet is what the fine in Rule 07 is read off."
+          "Your cutoff and week-end day come from Week 0, and the sheet is what the fine in Rule 06 is read off."
         ],
         "points": [
           "A session — anything you would call training — is 1",
@@ -157,25 +154,7 @@ export const RULE_STAGES: RuleStage[] = [
         "table": [],
         "ties": [
           "r3",
-          "r6",
           "r7"
-        ],
-        "hasDefault": false
-      },
-      {
-        "id": "r6",
-        "number": "06",
-        "title": "Swaps",
-        "summary": "Set the week once. One swap a week, before the day starts.",
-        "paragraphs": [
-          "Commit the days you plan to train. The week you are in can be planned once; after that the plan stands, and the swap is the only way to move a day. Weeks that have not started yet can be rewritten freely.",
-          "Substitute one session for an equivalent. Before the day starts, never after. You can opt out of the scheduling system entirely and just not use swaps."
-        ],
-        "points": [],
-        "table": [],
-        "ties": [
-          "r5",
-          "r3"
         ],
         "hasDefault": false
       }
@@ -183,12 +162,12 @@ export const RULE_STAGES: RuleStage[] = [
   },
   {
     "name": "When you miss",
-    "span": "Rules 07–10",
-    "blurb": "A missed week costs money, the price doubles if it keeps happening, and not paying is worse than missing.",
+    "span": "Rules 06–07",
+    "blurb": "A missed week costs money, and the price of a miss doubles if it keeps happening.",
     "rules": [
       {
         "id": "r7",
-        "number": "07",
+        "number": "06",
         "title": "Fines",
         "summary": "₹200 to start. Two strikes at a price, then it doubles.",
         "paragraphs": [
@@ -215,58 +194,14 @@ export const RULE_STAGES: RuleStage[] = [
         ],
         "ties": [
           "r5",
-          "r8",
-          "r9",
           "r11",
           "r12"
-        ],
-        "hasDefault": false
-      },
-      {
-        "id": "r8",
-        "number": "08",
-        "title": "Standing",
-        "summary": "Unpaid past 48h → suspended. Two more fines → out.",
-        "paragraphs": [
-          "Suspended — a fine unpaid past 48 hours. You keep logging, goals stay locked as approved, no petitions , and no prize money until you clear it. Pay up and you're Active again; your price level does not reset.",
-          "Paying puts you all the way back. Clearing what you owe restores your standing and your share of the pot. A fined week costs you the fine and nothing else — only elimination is permanent.",
-          "Out — two fines accumulated while suspended. Everything you've paid stays in the prize pot. No buy-backs."
-        ],
-        "points": [],
-        "table": [],
-        "ties": [
-          "r7",
-          "r4",
-          "r11",
-          "r12"
-        ],
-        "hasDefault": true
-      },
-      {
-        "id": "r9",
-        "number": "09",
-        "title": "Skip tokens",
-        "summary": "3 a season. Never 3 in a row, never in the last two weeks.",
-        "paragraphs": [
-          "Each token cancels one week's fine. The price level doesn't move, and the week costs you nothing.",
-          "Tokens are for genuine unavoidable situations — agree on that spirit at Week 0."
-        ],
-        "points": [
-          "Appeal before your week starts",
-          "Whole group approves",
-          "Maximum two consecutive"
-        ],
-        "table": [],
-        "ties": [
-          "r7",
-          "r3",
-          "r11"
         ],
         "hasDefault": false
       },
       {
         "id": "r10",
-        "number": "10",
+        "number": "07",
         "title": "Injury",
         "summary": "Solid proof → full refund and exit.",
         "paragraphs": [
@@ -283,25 +218,22 @@ export const RULE_STAGES: RuleStage[] = [
   },
   {
     "name": "How it ends",
-    "span": "Rules 11–12",
+    "span": "Rules 08–09",
     "blurb": "Who takes the money, who takes the title, and who keeps the books all season.",
     "rules": [
       {
         "id": "r11",
-        "number": "11",
+        "number": "08",
         "title": "Winning",
-        "summary": "Everyone still standing splits the pot. Most goals wins the title.",
+        "summary": "Everyone with nothing owing splits the pot. Most goals wins the title.",
         "paragraphs": [],
         "points": [
-          "The prize pot splits between everyone still standing at the end — anyone not eliminated, with nothing left owing. Fined weeks don't cost you a share; they only cost you the fine.",
-          "If everyone gets eliminated, nobody takes the pot and the money funds a group tiebreaker celebration instead.",
+          "The prize pot splits between everyone who ends the season with nothing left owing. A fined week doesn't cost you a share; it only costs you the fine.",
           "Challenge winner — most goals completed at target. Tiebreak: fewest fined weeks."
         ],
         "table": [],
         "ties": [
           "r7",
-          "r8",
-          "r9",
           "r10",
           "r2"
         ],
@@ -309,7 +241,7 @@ export const RULE_STAGES: RuleStage[] = [
       },
       {
         "id": "r12",
-        "number": "12",
+        "number": "09",
         "title": "Admin",
         "summary": "Scorekeeper and Treasurer. Two people, both unassigned.",
         "paragraphs": [
@@ -319,8 +251,7 @@ export const RULE_STAGES: RuleStage[] = [
         "table": [],
         "ties": [
           "r5",
-          "r7",
-          "r8"
+          "r7"
         ],
         "hasDefault": false
       }

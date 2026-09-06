@@ -1,13 +1,10 @@
 import {
   runSeason,
-  skipTokenBlocker,
   goalSplitError,
   goalProgressFraction,
   fineAtLevel,
   FINE_BASE,
   WORKOUTS_PER_WEEK,
-  MAX_SKIP_TOKENS,
-  SEASON_WEEKS,
 } from './seasonEngine';
 import { WorkoutDay } from '../types';
 
@@ -44,7 +41,7 @@ const workouts = (userId: string, perWeek: WeekEntry[]): WorkoutDay[] => {
   return rows;
 };
 
-const season = (perWeek: WeekEntry[], opts: { skipWeeks?: number[]; settledWeeks?: number[] } = {}) =>
+const season = (perWeek: WeekEntry[], opts: { settledWeeks?: number[] } = {}) =>
   runSeason({
     userId: 'u1',
     workoutDays: workouts('u1', perWeek),
@@ -88,6 +85,11 @@ describe('what makes a week clean', () => {
     expect(s.weeks[0].credits).toBe(5);
     expect(s.weeks[0].outcome).toBe('clean');
   });
+
+  test('a week is only ever clean or missed', () => {
+    const s = season([5, 0, [4, 2], [0, 7]]);
+    expect(s.weeks.map((w) => w.outcome)).toEqual(['clean', 'missed', 'clean', 'missed']);
+  });
 });
 
 describe('the price ladder', () => {
@@ -117,10 +119,21 @@ describe('the price ladder', () => {
     expect(s.weeks[4].fine).toBe(200);
   });
 
+  test('one clean week is not enough to halve it', () => {
+    const s = season([0, 0, 5, 0], { settledWeeks: paidUp(4) });
+    expect(s.weeks[3].fine).toBe(400);
+  });
+
   test('the ladder has no ceiling', () => {
     const s = season(Array(8).fill(0), { settledWeeks: paidUp(8) });
     expect(s.priceLevel).toBe(5);
     expect(s.weeks[7].fine).toBe(1600);
+  });
+
+  test('the ladder never falls below the base price', () => {
+    const s = season([5, 5, 5, 5, 0]);
+    expect(s.priceLevel).toBe(1);
+    expect(s.weeks[4].fine).toBe(200);
   });
 
   test('a broken streak restarts the count', () => {
@@ -130,46 +143,39 @@ describe('the price ladder', () => {
   });
 });
 
-describe('paying, suspension and elimination', () => {
-  test('the fine week itself is still inside the grace period', () => {
+describe('what is owed', () => {
+  test('a miss bills the price of the level it was judged at', () => {
     const s = season([0]);
-    expect(s.standing).toBe('active');
+    expect(s.billed).toBe(200);
     expect(s.outstanding).toBe(200);
+    expect(s.paid).toBe(0);
   });
 
-  test('carrying the balance into the next week suspends', () => {
-    const s = season([0, 5]);
-    expect(s.standing).toBe('suspended');
-    expect(s.suspendedAtWeek).toBe(2);
-  });
-
-  test('paying inside the week keeps you active', () => {
+  test('settling a week clears the balance and counts as paid', () => {
     const s = season([0, 5], { settledWeeks: [1] });
-    expect(s.standing).toBe('active');
     expect(s.paid).toBe(200);
     expect(s.outstanding).toBe(0);
   });
 
-  test('paying late lifts the suspension', () => {
-    const s = season([0, 5], { settledWeeks: [2] });
-    expect(s.standing).toBe('active');
-    expect(s.suspendedAtWeek).toBeNull();
-  });
-
-  test('two fines while suspended puts you out', () => {
-    const s = season([0, 0, 0, 0, 0]);
-    expect(s.standing).toBe('out');
-    expect(s.outAtWeek).toBe(3);
-  });
-
-  test('weeks after elimination are not played', () => {
-    expect(season([0, 0, 0, 0, 0]).weeks).toHaveLength(3);
-  });
-
-  test('settling every week keeps you in for the whole season', () => {
-    const s = season(Array(10).fill(0), { settledWeeks: paidUp(10) });
-    expect(s.standing).toBe('active');
+  test('settling late clears everything carried until then', () => {
+    const s = season([0, 0, 5], { settledWeeks: [3] });
+    expect(s.billed).toBe(400);
+    expect(s.paid).toBe(400);
     expect(s.outstanding).toBe(0);
+  });
+
+  test('missing never ends the season — every week is still replayed', () => {
+    const s = season(Array(10).fill(0));
+    expect(s.weeks).toHaveLength(10);
+    expect(s.missedWeeks).toBe(10);
+    expect(s.outstanding).toBe(s.billed);
+  });
+
+  test('a debt from week 1 does not stop later weeks counting clean', () => {
+    const s = season([0, 5, 5, 5]);
+    expect(s.cleanWeeks).toBe(3);
+    expect(s.weeks).toHaveLength(4);
+    expect(s.outstanding).toBe(200);
   });
 });
 
@@ -184,75 +190,12 @@ describe('the pot (Rule 11)', () => {
     expect(season([0, 5, 5]).potEligible).toBe(false);
   });
 
-  test('elimination does, permanently', () => {
-    expect(season([0, 0, 0, 0, 0]).potEligible).toBe(false);
+  test('a season of misses, all settled, is still in', () => {
+    expect(season(Array(10).fill(0), { settledWeeks: paidUp(10) }).potEligible).toBe(true);
   });
 
   test('a clean season is in', () => {
     expect(season([5, 5, 5, 5]).potEligible).toBe(true);
-  });
-});
-
-describe('skip tokens', () => {
-  test('a token cancels the fine and freezes the ladder', () => {
-    const s = season([0], { skipWeeks: [1] });
-    expect(s.weeks[0].outcome).toBe('skipped');
-    expect(s.billed).toBe(0);
-    expect(s.priceLevel).toBe(1);
-    expect(s.tokensUsed).toBe(1);
-  });
-
-  test('a token week neither breaks a streak nor builds one', () => {
-    const s = season([5, 5, 0, 5], { skipWeeks: [3] });
-    expect(s.cleanStreak).toBe(3);
-    expect(s.priceLevel).toBe(1);
-  });
-
-  test('a clean week does not spend a token', () => {
-    const s = season([5], { skipWeeks: [1] });
-    expect(s.tokensUsed).toBe(0);
-    expect(s.weeks[0].outcome).toBe('clean');
-  });
-
-  test('exactly 3 tokens are all honoured', () => {
-    const s = season([0, 0, 0], { skipWeeks: [1, 2, 3] });
-    expect(s.tokensUsed).toBe(3);
-    expect(s.billed).toBe(0);
-    expect(s.weeks.map((w) => w.outcome)).toEqual(['skipped', 'skipped', 'skipped']);
-  });
-
-  test('a 4th token week is fined like any other miss', () => {
-    const s = season([0, 0, 0, 0], { skipWeeks: [1, 2, 3, 4] });
-    expect(s.tokensUsed).toBe(3);
-    expect(s.missedWeeks).toBe(1);
-    expect(s.billed).toBe(200);
-    expect(s.weeks[3].outcome).toBe('missed');
-  });
-
-  test('the cap holds however many weeks were approved', () => {
-    const weeks = Array.from({ length: 24 }, (_, i) => i + 1);
-    const s = season(Array(24).fill(0), { skipWeeks: weeks, settledWeeks: weeks });
-    expect(s.tokensUsed).toBe(MAX_SKIP_TOKENS);
-  });
-
-  test('the first three approved weeks are the ones honoured, in week order', () => {
-    const s = season([0, 0, 0, 0], { skipWeeks: [4, 3, 2, 1] });
-    expect(s.weeks[3].outcome).toBe('missed');
-    expect(s.weeks[0].outcome).toBe('skipped');
-  });
-
-  test('a week outside the season is rejected as such, not as a late week', () => {
-    expect(skipTokenBlocker(99, SEASON_WEEKS, [])).toMatch(/isn't in the season/);
-    expect(skipTokenBlocker(0, SEASON_WEEKS, [])).toMatch(/isn't in the season/);
-    expect(skipTokenBlocker(SEASON_WEEKS, SEASON_WEEKS, [])).toMatch(/final two weeks/);
-  });
-
-  test('three a season, never three in a row, not in the last two weeks', () => {
-    expect(skipTokenBlocker(5, 24, [])).toBeNull();
-    expect(skipTokenBlocker(5, 24, [1, 2, 3])).toMatch(/All 3/);
-    expect(skipTokenBlocker(5, 24, [3, 4])).toMatch(/three in a row/);
-    expect(skipTokenBlocker(23, 24, [])).toMatch(/final two weeks/);
-    expect(skipTokenBlocker(5, 24, [2, 3])).toBeNull(); // gap breaks the run
   });
 });
 

@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { IndianRupee, LucideIcon, Ticket, Target, TrendingUp, Wallet } from "lucide-react";
+import { IndianRupee, LucideIcon, Target, TrendingUp, Wallet } from "lucide-react";
 import { apiFetch } from "../services/http";
 
 /**
  * What has happened in the season, newest first.
  *
  * The server assembles this from the records themselves — fines, payments,
- * tokens, goals — so the feed can't claim something the data doesn't support.
+ * goals — so the feed can't claim something the data doesn't support.
  */
 
 
-type Kind = "fine" | "payment" | "token" | "goal" | "progress";
+type Kind = "fine" | "payment" | "goal" | "progress";
 
 interface FeedEvent {
   kind: Kind;
@@ -25,7 +25,6 @@ interface FeedEvent {
 const ICON: Record<Kind, LucideIcon> = {
   fine: IndianRupee,
   payment: Wallet,
-  token: Ticket,
   goal: Target,
   progress: TrendingUp,
 };
@@ -33,7 +32,6 @@ const ICON: Record<Kind, LucideIcon> = {
 const TONE: Record<Kind, string> = {
   fine: "text-owed-600",
   payment: "text-clean-600",
-  token: "text-skip-600",
   goal: "text-clean-600",
   progress: "text-ink-muted",
 };
@@ -81,7 +79,7 @@ const Feed: React.FC<{ currentUserId?: string }> = ({ currentUserId }) => {
       <div className="py-10 text-center">
         <p className="font-semibold text-ink">Nothing has happened yet</p>
         <p className="text-sm text-ink-muted mt-1">
-          Fines, payments, skip tokens and completed goals all show up here.
+          Fines, payments and completed goals all show up here.
         </p>
       </div>
     );

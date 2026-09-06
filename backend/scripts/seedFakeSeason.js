@@ -1,7 +1,7 @@
 /**
  * Seed a fake season covering every state the rules can produce.
  *
- * Nine players, each parked in a different corner of Rules 07-11, plus a
+ * Nine players, each parked in a different corner of the money rules, plus a
  * different legal (and one deliberately incomplete) goal split each. Fines are
  * derived by the same engine the API uses, so the seeded data can never
  * disagree with what the app would charge.
@@ -23,6 +23,9 @@ const { DDL, INDEXES, MIGRATIONS } = require("../schema");
 const engine = require("../../src/utils/seasonEngine");
 const { v4: uuidv4 } = require("uuid");
 
+/** Hours before a fine reads as overdue. Mirrors backend/server.js. */
+const { PAYMENT_GRACE_HOURS } = engine;
+
 const WEEKS_PLAYED = 10;
 const CLEAN = 5; // a clean week
 const MISS = 2; // short of the 5 needed
@@ -31,7 +34,6 @@ const WALKED = [3, 4];
 
 /**
  * weeks   — workouts logged per week
- * skips   — weeks covered by an approved skip token
  * pays    — "all" settles every fine, "none" settles nothing,
  *           or an array of the weeks whose fines get settled
  * goals   — [points, description, category, completed?, approved?, baseline, target, unit]
@@ -43,7 +45,6 @@ const PLAYERS = [
     avatar: "🏃‍♀️",
     note: "perfect season",
     weeks: Array(10).fill(CLEAN),
-    skips: [],
     pays: "all",
     goals: [
       [3, "Deadlift 100kg", "strength", true, true, 70, 100, "kg"],
@@ -54,9 +55,8 @@ const PLAYERS = [
     id: "rahul",
     name: "Rahul",
     avatar: "🏋️",
-    note: "fined this week, still inside the 48 hours",
+    note: "one unpaid fine, from the week that just closed",
     weeks: [...Array(9).fill(CLEAN), MISS],
-    skips: [],
     pays: "none",
     goals: [
       [2, "Bench 80kg for 5", "strength", false, true, 60, 80, "kg"],
@@ -68,9 +68,8 @@ const PLAYERS = [
     id: "sana",
     name: "Sana",
     avatar: "🚴‍♀️",
-    note: "suspended — carried an unpaid fine into a new week",
+    note: "one miss, never paid — owes it and sits out of the pot",
     weeks: [CLEAN, CLEAN, MISS, ...Array(7).fill(CLEAN)],
-    skips: [],
     pays: "none",
     goals: [
       [1, "Run 5k every week", "cardio", true, true, 0, 10, "runs"],
@@ -87,7 +86,6 @@ const PLAYERS = [
     avatar: "🥊",
     note: "three misses, all paid — price doubled to ₹400",
     weeks: [...Array(7).fill(CLEAN), MISS, MISS, MISS],
-    skips: [],
     pays: "all",
     goals: [
       [3, "Squat bodyweight x10", "strength", true, true, 4, 10, "reps"],
@@ -101,7 +99,6 @@ const PLAYERS = [
     avatar: "🤸‍♀️",
     note: "six misses paid — the ladder is up at ₹800",
     weeks: [MISS, MISS, MISS, MISS, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN],
-    skips: [],
     pays: "all",
     goals: [
       [3, "Muscle-up unassisted", "strength", false, true, 0, 1, "reps"],
@@ -116,7 +113,6 @@ const PLAYERS = [
     avatar: "⛹️",
     note: "climbed, then clean weeks halved the price back to ₹200",
     weeks: [MISS, MISS, MISS, CLEAN, CLEAN, WALKED, CLEAN, WALKED, CLEAN, CLEAN],
-    skips: [],
     pays: "all",
     goals: [
       [2, "Row 2km under 8 minutes", "cardio", true, true, 9.5, 8, "min"],
@@ -129,9 +125,8 @@ const PLAYERS = [
     id: "dev",
     name: "Dev",
     avatar: "🚶",
-    note: "never paid — suspended, then out",
+    note: "three misses, none of them paid",
     weeks: [MISS, CLEAN, MISS, MISS, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN],
-    skips: [],
     pays: "none",
     goals: [
       [2, "Cycle to work 40 times", "consistency", false, true],
@@ -145,9 +140,8 @@ const PLAYERS = [
     id: "anya",
     name: "Anya",
     avatar: "🧗‍♀️",
-    note: "all three skip tokens spent, two of them back to back",
+    note: "three scattered misses, all paid",
     weeks: [CLEAN, MISS, MISS, CLEAN, CLEAN, MISS, CLEAN, CLEAN, CLEAN, CLEAN],
-    skips: [2, 3, 6],
     pays: "all",
     goals: [
       [3, "Lead climb 6b", "sports", false, true, 0, 6, "grade"],
@@ -158,9 +152,8 @@ const PLAYERS = [
     id: "kabir",
     name: "Kabir",
     avatar: "🏊",
-    note: "one week skipped, one fine paid, one still due — and two walked weeks",
+    note: "one fine paid, two still due — and two walked weeks",
     weeks: [CLEAN, MISS, WALKED, MISS, CLEAN, WALKED, CLEAN, CLEAN, CLEAN, MISS],
-    skips: [2],
     pays: [4],
     goals: [
       [3, "Swim 100 lengths", "endurance", false, false, 20, 100, "lengths"],
@@ -191,7 +184,7 @@ async function seed() {
   }
   await db.execMultiple(INDEXES);
 
-  for (const table of ["goal_progress", "fines", "skip_tokens", "workout_days", "goals", "users"]) {
+  for (const table of ["goal_progress", "fines", "workout_days", "goals", "users"]) {
     await db.run(`DELETE FROM ${table}`);
   }
   await db.run("DELETE FROM admin_settings");
@@ -207,8 +200,8 @@ async function seed() {
 
   for (const player of PLAYERS) {
     await db.run(
-      `INSERT INTO users (id, name, avatar, start_date, price_level, standing, cutoff_hour, week_end_day)
-       VALUES (?, ?, ?, ?, 1, 'active', 22, 7)`,
+      `INSERT INTO users (id, name, avatar, start_date, price_level, cutoff_hour, week_end_day)
+       VALUES (?, ?, ?, ?, 1, 22, 7)`,
       [player.id, player.name, player.avatar, "2026-01-19"]
     );
 
@@ -229,14 +222,6 @@ async function seed() {
       );
     }
 
-    for (const week of player.skips) {
-      await db.run(
-        `INSERT INTO skip_tokens (id, user_id, week, requested_at, approved_at, approved_by)
-         VALUES (?, ?, ?, ?, ?, 'group')`,
-        [uuidv4(), player.id, week, "2026-01-18", "2026-01-18"]
-      );
-    }
-
     // Ask the engine what this season costs, then record those fines. Using the
     // same engine as the API means the seed can't invent a fine the rules wouldn't.
     const settledWeeks =
@@ -249,7 +234,6 @@ async function seed() {
     const state = engine.runSeason({
       userId: player.id,
       workoutDays: workouts.map((r) => ({ ...r, userId: player.id, isCompleted: true })),
-      skipWeeks: player.skips,
       settledWeeks,
       completedWeeks: WEEKS_PLAYED,
     });
@@ -258,7 +242,7 @@ async function seed() {
       if (week.fine <= 0) continue;
       const issued = new Date("2026-01-19");
       issued.setDate(issued.getDate() + week.week * 7);
-      const due = new Date(issued.getTime() + engine.PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
+      const due = new Date(issued.getTime() + PAYMENT_GRACE_HOURS * 60 * 60 * 1000);
       const settled = settledWeeks.includes(week.week) ? due.toISOString() : null;
 
       await db.run(
@@ -269,8 +253,8 @@ async function seed() {
     }
 
     await db.run(
-      "UPDATE users SET price_level = ?, clean_weeks = ?, missed_weeks = ?, standing = ? WHERE id = ?",
-      [state.priceLevel, state.cleanWeeks, state.missedWeeks, state.standing, player.id]
+      "UPDATE users SET price_level = ?, clean_weeks = ?, missed_weeks = ? WHERE id = ?",
+      [state.priceLevel, state.cleanWeeks, state.missedWeeks, player.id]
     );
 
     for (const goal of player.goals) {
@@ -326,12 +310,10 @@ async function seed() {
     summary.push({
       name: player.name,
       note: player.note,
-      standing: state.standing,
       price: engine.fineAtLevel(state.priceLevel),
       billed: state.billed,
       paid: state.paid,
       outstanding: state.outstanding,
-      tokensLeft: engine.MAX_SKIP_TOKENS - state.tokensUsed,
       pot: state.potEligible ? "IN" : "OUT",
       goals: `${player.goals.map((g) => g[0]).join("+")} = ${spent}${spent === 6 ? "" : " (incomplete)"}`,
     });
@@ -346,13 +328,13 @@ async function seed() {
 
   console.log(`\n✅ Seeded ${PLAYERS.length} players across ${WEEKS_PLAYED} completed weeks\n`);
   console.log(
-    "name      standing   price   billed   paid   owed   skips  pot   goals              scenario"
+    "name      price   billed   paid   owed   pot   goals              scenario"
   );
   for (const s of summary) {
     console.log(
-      `${s.name.padEnd(9)} ${s.standing.padEnd(10)} ₹${String(s.price).padEnd(6)} ₹${String(s.billed).padEnd(7)} ₹${String(
+      `${s.name.padEnd(9)} ₹${String(s.price).padEnd(6)} ₹${String(s.billed).padEnd(7)} ₹${String(
         s.paid
-      ).padEnd(5)} ₹${String(s.outstanding).padEnd(5)} ${String(s.tokensLeft).padEnd(6)} ${s.pot.padEnd(5)} ${s.goals.padEnd(
+      ).padEnd(5)} ₹${String(s.outstanding).padEnd(5)} ${s.pot.padEnd(5)} ${s.goals.padEnd(
         18
       )} ${s.note}`
     );

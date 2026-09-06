@@ -10,13 +10,12 @@ import { apiFetch, latestGoalReadings } from "../services/http";
  * record sits in the pack, and how far the goals have actually moved.
  *
  * Colours are the two the season already has — a clean week is green, money is
- * rust — stepped for charts and validated against both grounds. A skip is a
- * neutral hatch on purpose: it is neither a win nor a miss.
+ * rust — stepped for charts and validated against both grounds.
  */
 
 interface WeekCell {
   week: number;
-  outcome: "clean" | "missed" | "skipped";
+  outcome: "clean" | "missed";
   credits: number;
   fine: number;
 }
@@ -39,10 +38,6 @@ const median = (values: number[]): number => {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
-
-/** A skip is neither colour, so it gets the one texture in the system. */
-const HATCH =
-  "repeating-linear-gradient(45deg, rgb(var(--ink-faint) / 0.55) 0 2px, rgb(var(--paper-sunk)) 2px 5px)";
 
 /** How far a goal has come, on the numbers rather than on a tick. */
 const goalFraction = (goal: Goal, reading?: number): number => {
@@ -92,7 +87,6 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
         week: cells[0]?.week ?? i + 1,
         clean: cells.filter((c) => c.outcome === "clean").length,
         missed: cells.filter((c) => c.outcome === "missed").length,
-        skipped: cells.filter((c) => c.outcome === "skipped").length,
         fined: cells.reduce((sum, c) => sum + c.fine, 0),
         players: cells.length,
       };
@@ -246,7 +240,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           </h4>
           <p className="text-sm text-ink-muted tnum" role="status">
             {hovered
-              ? `Week ${hovered.week} — ${hovered.clean} clean · ${hovered.missed} fined · ${hovered.skipped} skipped`
+              ? `Week ${hovered.week} — ${hovered.clean} clean · ${hovered.missed} fined`
               : "Pick a week for the split"}
           </p>
         </div>
@@ -255,7 +249,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           className="flex gap-1 h-36 mt-3 items-end"
           onMouseLeave={() => setHoverWeek(null)}
           role="img"
-          aria-label={`Clean, fined and skipped weeks for all ${rows.length} players, weeks 1 to ${
+          aria-label={`Clean and fined weeks for all ${rows.length} players, weeks 1 to ${
             weeks[weeks.length - 1].week
           }`}
         >
@@ -266,19 +260,13 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
               onClick={() => setHoverWeek(w.week)}
               className="flex-1 h-full flex flex-col gap-[2px] justify-end cursor-default"
             >
-              {w.skipped ? (
-                <div
-                  style={{ height: `${(w.skipped / w.players) * 100}%`, background: HATCH }}
-                  className="rounded-t-md"
-                />
-              ) : null}
               {w.missed ? (
                 <div
                   style={{
                     height: `${(w.missed / w.players) * 100}%`,
                     background: "rgb(var(--chart-owed))",
                   }}
-                  className={w.skipped ? "" : "rounded-t-md"}
+                  className="rounded-t-md"
                 />
               ) : null}
               {w.clean ? (
@@ -287,7 +275,7 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
                     height: `${(w.clean / w.players) * 100}%`,
                     background: "rgb(var(--chart-clean))",
                   }}
-                  className={w.skipped || w.missed ? "rounded-b-md" : "rounded-md"}
+                  className={w.missed ? "rounded-b-md" : "rounded-md"}
                 />
               ) : null}
             </div>
@@ -305,7 +293,6 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
           {[
             ["Clean", "rgb(var(--chart-clean))"],
             ["Fined", "rgb(var(--chart-owed))"],
-            ["Skip token", HATCH],
           ].map(([label, fill]) => (
             <li key={label} className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-sm" style={{ background: fill }} aria-hidden="true" />
@@ -410,7 +397,6 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
                 <th className="py-2 pr-4 font-semibold text-ink">Week</th>
                 <th className="py-2 pr-4 font-semibold text-ink text-right">Clean</th>
                 <th className="py-2 pr-4 font-semibold text-ink text-right">Fined</th>
-                <th className="py-2 pr-4 font-semibold text-ink text-right">Skipped</th>
                 <th className="py-2 font-semibold text-ink text-right">Billed</th>
               </tr>
             </thead>
@@ -420,7 +406,6 @@ const GroupStats: React.FC<{ rows: StatsRow[]; currentUserId?: string }> = ({ ro
                   <td className="py-2 pr-4 tnum text-ink">{w.week}</td>
                   <td className="py-2 pr-4 tnum text-right text-ink-muted">{w.clean}</td>
                   <td className="py-2 pr-4 tnum text-right text-ink-muted">{w.missed}</td>
-                  <td className="py-2 pr-4 tnum text-right text-ink-muted">{w.skipped}</td>
                   <td className="py-2 tnum text-right text-ink">{rupees(w.fined)}</td>
                 </tr>
               ))}

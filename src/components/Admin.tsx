@@ -12,7 +12,10 @@ import {
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './ToastContext';
 import { apiFetch } from '../services/http';
-import { SEASON_WEEKS, WORKOUTS_PER_WEEK } from '../utils/seasonEngine';
+import { CREDIT_BY_KIND, fineAtLevel, SEASON_WEEKS, WORKOUTS_PER_WEEK } from '../utils/seasonEngine';
+
+/** The ladder is the engine's to state — this screen only prints it. */
+const rupees = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
 interface AdminProps {
   users: User[];
@@ -76,7 +79,6 @@ const Admin: React.FC<AdminProps> = ({
       priceLevel: 1,
       cleanWeeks: newUser.cleanWeeks,
       missedWeeks: newUser.missedWeeks,
-      standing: 'active',
       cutoffHour: 0,
       weekEndDay: 7,
       isActive: newUser.isActive,
@@ -148,16 +150,15 @@ const Admin: React.FC<AdminProps> = ({
   /**
    * How many players are short of a clean week right now.
    *
-   * An upper bound on what advancing will bill: an approved skip token covers a
-   * miss and this screen doesn't hold tokens. The server decides — this is only
-   * what the admin is told before they commit.
+   * Credit, not a count: a session is worth 1 and a 10k-step day a half. The
+   * server decides what is actually billed — this is what the admin is told
+   * before they commit.
    */
   const shortOfClean = users.filter(
     (u) =>
-      u.standing !== 'out' &&
-      workoutDays.filter(
-        (w) => w.userId === u.id && w.week === currentWeek && w.isCompleted
-      ).length < WORKOUTS_PER_WEEK
+      workoutDays
+        .filter((w) => w.userId === u.id && w.week === currentWeek && w.isCompleted)
+        .reduce((sum, w) => sum + (CREDIT_BY_KIND[w.kind ?? 'session'] ?? 1), 0) < WORKOUTS_PER_WEEK
   ).length;
 
   const advanceWeek = async () => {
@@ -179,7 +180,7 @@ const Admin: React.FC<AdminProps> = ({
         currentWeek: data.currentWeek,
         isActive: data.isActive,
       });
-      // Fines, price levels and standings all moved with the week.
+      // Fines and price levels all moved with the week.
       onRecalculateConsistency?.();
       showToast(
         `Week ${data.movedFrom} closed. ${data.finesIssued} fine${data.finesIssued === 1 ? '' : 's'} posted.`,
@@ -250,27 +251,29 @@ const Admin: React.FC<AdminProps> = ({
             </dd>
           </div>
           <div className="bg-paper-card px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Active</dt>
-            <dd className="display text-2xl tnum mt-0.5 text-clean-600">
-              {users.filter((u) => u.standing === 'active').length}
-            </dd>
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Players</dt>
+            <dd className="display text-2xl tnum mt-0.5 text-clean-600">{users.length}</dd>
           </div>
           <div className="bg-paper-card px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Suspended</dt>
-            <dd className="display text-2xl tnum mt-0.5 text-skip-600">
-              {users.filter((u) => u.standing === 'suspended').length}
-            </dd>
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+              Short this week
+            </dt>
+            <dd className="display text-2xl tnum mt-0.5 text-owed-600">{shortOfClean}</dd>
           </div>
           <div className="bg-paper-card px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Out</dt>
-            <dd className="display text-2xl tnum mt-0.5 text-owed-600">
-              {users.filter((u) => u.standing === 'out').length}
-            </dd>
-          </div>
-          <div className="bg-paper-card px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">At ₹2,000</dt>
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+              At {rupees(fineAtLevel(1))}
+            </dt>
             <dd className="display text-2xl tnum mt-0.5">
-              {users.filter((u) => u.priceLevel === 3).length}
+              {users.filter((u) => u.priceLevel === 1).length}
+            </dd>
+          </div>
+          <div className="bg-paper-card px-3 py-2.5">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+              Climbed higher
+            </dt>
+            <dd className="display text-2xl tnum mt-0.5 text-owed-600">
+              {users.filter((u) => u.priceLevel > 1).length}
             </dd>
           </div>
         </dl>
@@ -313,7 +316,7 @@ const Admin: React.FC<AdminProps> = ({
                     </div>
                     <div>
                       <div className="font-medium text-ink">{user.name}</div>
-                      <div className="text-xs text-ink-muted tnum">₹{(user.priceLevel === 3 ? 2000 : user.priceLevel === 2 ? 1000 : 500).toLocaleString('en-IN')} a miss</div>
+                      <div className="text-xs text-ink-muted tnum">{rupees(fineAtLevel(user.priceLevel))} a miss</div>
                     </div>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -336,7 +339,7 @@ const Admin: React.FC<AdminProps> = ({
                   </div>
                   <div className="bg-paper-sunk rounded p-2">
                     <div className="text-sm font-bold text-ink tnum">
-                      ₹{(user.priceLevel === 3 ? 2000 : user.priceLevel === 2 ? 1000 : 500).toLocaleString('en-IN')}
+                      {rupees(fineAtLevel(user.priceLevel))}
                     </div>
                     <div className="text-[10px] text-ink-muted">A miss</div>
                   </div>
@@ -378,7 +381,6 @@ const Admin: React.FC<AdminProps> = ({
                   <th className="text-center py-3 px-4 font-medium text-ink">Miss costs</th>
                   <th className="text-center py-3 px-4 font-medium text-ink">Clean Weeks</th>
                   <th className="text-center py-3 px-4 font-medium text-ink">Missed Weeks</th>
-                                    <th className="text-center py-3 px-4 font-medium text-ink">Status</th>
                                     <th className="text-center py-3 px-4 font-medium text-ink">Actions</th>
                 </tr>
               </thead>
@@ -398,7 +400,7 @@ const Admin: React.FC<AdminProps> = ({
 
                     <td className="py-4 px-4 text-center">
                       <span className="px-3 py-1 bg-paper-sunk text-ink text-sm font-medium rounded-full">
-                        ₹{(user.priceLevel === 3 ? 2000 : user.priceLevel === 2 ? 1000 : 500).toLocaleString('en-IN')}
+                        {rupees(fineAtLevel(user.priceLevel))}
                       </span>
                     </td>
 
@@ -408,16 +410,6 @@ const Admin: React.FC<AdminProps> = ({
 
                     <td className="py-4 px-4 text-center">
                       <span className="text-owed-600 font-medium">{user.missedWeeks}</span>
-                    </td>
-
-                    <td className="py-4 px-4 text-center">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        user.isActive
-                          ? 'bg-clean-100 text-green-800'
-                          : 'bg-owed-100 text-red-800'
-                      }`}>
-                        {user.isActive ? 'Active' : 'Inactive'}
-                      </span>
                     </td>
 
                     <td className="py-4 px-4">
@@ -515,19 +507,6 @@ const Admin: React.FC<AdminProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-ink mb-1">Status</label>
-                  <select
-                    value={newUser.isActive ? 'active' : 'inactive'}
-                    onChange={(e) => setNewUser({ ...newUser, isActive: e.target.value === 'active' })}
-                    className="w-full border border-line rounded-lg px-3 py-2"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
             </div>
 
             <div className="flex space-x-3 mt-6">

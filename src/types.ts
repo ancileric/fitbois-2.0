@@ -7,12 +7,11 @@ export interface User {
   priceLevel: 1 | 2 | 3;
   cleanWeeks: number;
   missedWeeks: number;
-  standing: "active" | "suspended" | "out";
   /** The hour this player's day rolls over, locked at Week 0. */
   cutoffHour: number;
   /** 1 = Monday … 7 = Sunday. Locked at Week 0. */
   weekEndDay: number;
-  /** Only elimination makes a player inactive now. */
+  /** Nothing takes a player out of the season any more. */
   isActive: boolean;
 
   // --- FitBois 2.0 fields, still read by screens that haven't migrated ---
@@ -104,17 +103,6 @@ export interface WorkoutDay {
   notes?: string;
   markedBy: 'user' | 'admin';
   timestamp: string;
-}
-
-export interface WeeklyPlan {
-  id: string;
-  userId: string;
-  week: number;
-  committedDays: number[]; // 1 = Monday … 7 = Sunday
-  committedAt: string;
-  createdBy: 'user' | 'admin';
-  /** Rule 06: one swap a week. */
-  swapsUsed?: number;
 }
 
 export interface AdminSettings {

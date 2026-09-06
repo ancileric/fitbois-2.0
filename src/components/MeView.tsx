@@ -1,5 +1,5 @@
 import React from "react";
-import { Goal, User, WeeklyPlan, WorkoutDay } from "../types";
+import { Goal, User, WorkoutDay } from "../types";
 import MySeason from "./MySeason";
 import GoalBoard from "./GoalBoard";
 
@@ -14,15 +14,7 @@ interface MeViewProps {
   users: User[];
   goals: Goal[];
   workoutDays: WorkoutDay[];
-  weeklyPlans: WeeklyPlan[];
-  challengeStartDate: string;
   onUpdateWorkoutDay: (day: WorkoutDay) => void;
-  onUpdateWeeklyPlan: (plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: "user" | "admin";
-  }) => Promise<WeeklyPlan | undefined> | Promise<WeeklyPlan>;
   onAddGoal: (goal: Goal) => void;
   onUpdateGoal: (goal: Goal) => void;
   onDeleteGoal: (goalId: string) => void;
@@ -33,10 +25,7 @@ const MeView: React.FC<MeViewProps> = ({
   users,
   goals,
   workoutDays,
-  weeklyPlans,
-  challengeStartDate,
   onUpdateWorkoutDay,
-  onUpdateWeeklyPlan,
   onAddGoal,
   onUpdateGoal,
   onDeleteGoal,
@@ -45,10 +34,7 @@ const MeView: React.FC<MeViewProps> = ({
     <MySeason
       currentUser={currentUser}
       workoutDays={workoutDays}
-      weeklyPlans={weeklyPlans}
       onUpdateWorkoutDay={onUpdateWorkoutDay}
-      onUpdateWeeklyPlan={onUpdateWeeklyPlan}
-      challengeStartDate={challengeStartDate}
     />
 
     <div className="pt-10 mt-10">

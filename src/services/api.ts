@@ -1,5 +1,5 @@
 import { adminKey, currentPlayerId } from './http';
-import { User, Goal, WorkoutDay, WeeklyPlan } from '../types';
+import { User, Goal, WorkoutDay } from '../types';
 
 // In production, use relative URL since frontend and backend are on same server
 // In development, use localhost:5000
@@ -264,34 +264,6 @@ class ApiService {
     completionRate: number;
   }> {
     return this.fetchApi(`/goals/stats/${userId}`);
-  }
-
-  // ==================== WEEKLY PLANS METHODS ====================
-
-  async getWeeklyPlans(): Promise<WeeklyPlan[]> {
-    return this.fetchApi<WeeklyPlan[]>('/weekly-plans');
-  }
-
-  async getWeeklyPlan(userId: string, week: number): Promise<WeeklyPlan> {
-    return this.fetchApi<WeeklyPlan>(`/weekly-plans/${userId}/${week}`);
-  }
-
-  async saveWeeklyPlan(plan: {
-    userId: string;
-    week: number;
-    committedDays: number[];
-    createdBy?: 'user' | 'admin';
-  }): Promise<WeeklyPlan> {
-    return this.fetchApi<WeeklyPlan>('/weekly-plans', {
-      method: 'POST',
-      body: JSON.stringify(plan),
-    });
-  }
-
-  async deleteWeeklyPlan(userId: string, week: number): Promise<void> {
-    await this.fetchApi<void>(`/weekly-plans/${userId}/${week}`, {
-      method: 'DELETE',
-    });
   }
 
   // ==================== CONNECTION TEST ====================
