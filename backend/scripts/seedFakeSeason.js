@@ -8,6 +8,16 @@
  *
  * Wipes the tables it seeds. Local development only.
  */
+// Fixtures belong nowhere near the season people are paying into. Turso means
+// production, so this refuses unless someone deliberately types SEED_FORCE=1.
+if (process.env.TURSO_DATABASE_URL && process.env.SEED_FORCE !== "1") {
+  console.error(
+    "Refusing to seed fake players into a Turso database. " +
+      "Unset TURSO_DATABASE_URL for local work, or set SEED_FORCE=1 if you truly mean it."
+  );
+  process.exit(1);
+}
+
 const db = require("../db");
 const { DDL } = require("../schema");
 const engine = require("../../src/utils/seasonEngine");

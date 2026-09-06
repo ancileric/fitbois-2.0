@@ -50,6 +50,8 @@ if (isProduction && !isVercel) {
 
 // ==================== DATABASE INITIALIZATION ====================
 
+const SEASON_WEEKS_MS = engine.SEASON_WEEKS * 7 * 24 * 60 * 60 * 1000;
+
 let initPromise = null;
 
 async function runDatabaseInit() {
@@ -109,6 +111,18 @@ async function runDatabaseInit() {
       }
     }
   }
+
+  // A season needs a row to be a season: every screen reads the current week
+  // from here, and nothing else creates it, so a fresh database would answer
+  // "Season not configured" forever. Admin edits the dates afterwards.
+  const seasonStart = new Date().toISOString().slice(0, 10);
+  const seasonEnd = new Date(Date.now() + SEASON_WEEKS_MS).toISOString().slice(0, 10);
+  await db.run(
+    `INSERT OR IGNORE INTO admin_settings
+       (id, challenge_start_date, challenge_end_date, current_week, is_active)
+     VALUES (1, ?, ?, 1, 1)`,
+    [seasonStart, seasonEnd]
+  );
 
   // Indexes last: some of them cover columns the ALTERs above just added.
   if (typeof db.execMultiple === "function") {
@@ -392,7 +406,16 @@ app.post("/api/users", async (req, res) => {
 
   try {
     const id = uuidv4();
-    const startDate = "2026-01-19";
+    // A player joins the season that exists, not a date pinned in the source.
+    const season = await db.get(
+      "SELECT challenge_start_date FROM admin_settings WHERE id = 1"
+    );
+    const startDate =
+      (typeof req.body.startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.body.startDate)
+        ? req.body.startDate
+        : null) ||
+      season?.challenge_start_date ||
+      new Date().toISOString().slice(0, 10);
     const sanitizedName = sanitizeString(name);
     const sanitizedAvatar = avatar
       ? sanitizeString(avatar)
@@ -490,10 +513,31 @@ app.put("/api/users/:id", async (req, res) => {
   }
 
   try {
+    // A partial update is the normal case — the client sends the fields it
+    // changed. Anything absent keeps the value already stored; passing the
+    // undefined straight through used to fail the whole request.
+    const existing = await db.get(
+      `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks,
+              standing, cutoff_hour, week_end_day
+         FROM users WHERE id = ?`,
+      [req.params.id]
+    );
+    if (!existing) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
     const sanitizedName = sanitizeString(name);
     const sanitizedAvatar = avatar
       ? sanitizeString(avatar)
-      : sanitizedName.charAt(0).toUpperCase();
+      : existing.avatar || sanitizedName.charAt(0).toUpperCase();
+    const nextPriceLevel = priceLevel ?? Number(existing.price_level);
+    const nextCleanWeeks = cleanWeeks ?? Number(existing.clean_weeks);
+    const nextMissedWeeks = missedWeeks ?? Number(existing.missed_weeks);
+    const nextStanding =
+      standing || (isActive === false ? "out" : existing.standing || "active");
+    const nextCutoffHour = cutoffHour ?? Number(existing.cutoff_hour);
+    const nextWeekEndDay = weekEndDay ?? Number(existing.week_end_day);
 
     const result = await db.run(
       `UPDATE users SET
@@ -510,12 +554,12 @@ app.put("/api/users/:id", async (req, res) => {
       [
         sanitizedName,
         sanitizedAvatar,
-        priceLevel || 1,
-        cleanWeeks,
-        missedWeeks,
-        standing || (isActive === false ? "out" : "active"),
-        cutoffHour ?? 0,
-        weekEndDay ?? 7,
+        nextPriceLevel,
+        nextCleanWeeks,
+        nextMissedWeeks,
+        nextStanding,
+        nextCutoffHour,
+        nextWeekEndDay,
         req.params.id,
       ]
     );
@@ -531,14 +575,14 @@ app.put("/api/users/:id", async (req, res) => {
       id: req.params.id,
       name: sanitizedName,
       avatar: sanitizedAvatar,
-      startDate: "2026-01-19",
-      priceLevel,
-      cleanWeeks,
-      missedWeeks,
-      standing,
-      cutoffHour,
-      weekEndDay,
-      isActive: standing !== "out",
+      startDate: existing.start_date,
+      priceLevel: nextPriceLevel,
+      cleanWeeks: nextCleanWeeks,
+      missedWeeks: nextMissedWeeks,
+      standing: nextStanding,
+      cutoffHour: nextCutoffHour,
+      weekEndDay: nextWeekEndDay,
+      isActive: nextStanding !== "out",
     };
 
     res.json(user);
@@ -628,6 +672,39 @@ app.get("/api/workouts/user/:userId", async (req, res) => {
     res.json(workouts);
   } catch (err) {
     console.error("Error fetching user workouts:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ahead of /:userId/:week, or Express reads "stats" as a user id and the
+// week as a uuid, and the endpoint quietly answers with an empty list.
+app.get("/api/workouts/stats/:userId", async (req, res) => {
+  try {
+    const row = await db.get(
+      `SELECT
+        COUNT(*) as total_workouts,
+        SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_workouts,
+        COUNT(DISTINCT week) as weeks_with_data,
+        MAX(week) as latest_week
+      FROM workout_days
+      WHERE user_id = ?`,
+      [req.params.userId]
+    );
+
+    const stats = {
+      totalWorkouts: row.total_workouts || 0,
+      completedWorkouts: row.completed_workouts || 0,
+      weeksWithData: row.weeks_with_data || 0,
+      latestWeek: row.latest_week || 0,
+      completionRate:
+        row.total_workouts > 0
+          ? Math.round((row.completed_workouts / row.total_workouts) * 100)
+          : 0,
+    };
+
+    res.json(stats);
+  } catch (err) {
+    console.error("Error fetching workout stats:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -780,36 +857,6 @@ app.delete("/api/workouts/:id", async (req, res) => {
   }
 });
 
-app.get("/api/workouts/stats/:userId", async (req, res) => {
-  try {
-    const row = await db.get(
-      `SELECT
-        COUNT(*) as total_workouts,
-        SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_workouts,
-        COUNT(DISTINCT week) as weeks_with_data,
-        MAX(week) as latest_week
-      FROM workout_days
-      WHERE user_id = ?`,
-      [req.params.userId]
-    );
-
-    const stats = {
-      totalWorkouts: row.total_workouts || 0,
-      completedWorkouts: row.completed_workouts || 0,
-      weeksWithData: row.weeks_with_data || 0,
-      latestWeek: row.latest_week || 0,
-      completionRate:
-        row.total_workouts > 0
-          ? Math.round((row.completed_workouts / row.total_workouts) * 100)
-          : 0,
-    };
-
-    res.json(stats);
-  } catch (err) {
-    console.error("Error fetching workout stats:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ==================== GOALS ROUTES ====================
 
