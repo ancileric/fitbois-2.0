@@ -156,11 +156,25 @@ describe('what is owed', () => {
     expect(s.outstanding).toBe(0);
   });
 
-  test('settling late clears everything carried until then', () => {
-    const s = season([0, 0, 5], { settledWeeks: [3] });
+  test('paying one week does not clear the weeks behind it', () => {
+    // Settling week 2 leaves week 1 exactly as owed as it was. A fine belongs to
+    // its own week; nothing about paying the newest one forgives the oldest.
+    const s = season([0, 0, 5], { settledWeeks: [2] });
     expect(s.billed).toBe(400);
-    expect(s.paid).toBe(400);
-    expect(s.outstanding).toBe(0);
+    expect(s.paid).toBe(200);
+    expect(s.outstanding).toBe(200);
+    expect(s.potEligible).toBe(false);
+  });
+
+  test('the pot needs every fine settled, not just the last one', () => {
+    const owing = season([0, 0, 0], { settledWeeks: [3] });
+    expect(owing.paid).toBe(400);
+    expect(owing.outstanding).toBe(400);
+    expect(owing.potEligible).toBe(false);
+
+    const clear = season([0, 0, 0], { settledWeeks: [1, 2, 3] });
+    expect(clear.outstanding).toBe(0);
+    expect(clear.potEligible).toBe(true);
   });
 
   test('missing never ends the season — every week is still replayed', () => {

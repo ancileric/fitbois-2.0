@@ -181,9 +181,9 @@ const validateBoolean = (value, fieldName) => {
 
 const validatePriceLevel = (value) => {
   const level = Number(value);
-  if (!Number.isInteger(level) || level < 1 || level > 3) {
-    return "Price level must be 1, 2 or 3";
-  }
+  // The ladder doubles for as long as someone keeps missing, so there is no top
+  // rung to validate against — only "is this a real level".
+  if (!Number.isInteger(level) || level < 1) return "Price level must be a whole number, 1 or higher";
   return null;
 };
 
@@ -193,25 +193,6 @@ const validateGoalCategory = (value) => validateString(value, "Category", 1, 60)
 const sanitizeString = (value) => {
   if (typeof value !== "string") return value;
   return value.trim().replace(/[<>]/g, "");
-};
-
-// ==================== IST DATE HELPERS ====================
-// Challenge start (Monday, IST). MUST match frontend src/utils/dateUtils.ts.
-const CHALLENGE_START_UTC_MS = Date.UTC(2026, 0, 19);
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-const getCurrentWeekIST = () => {
-  const istNow = new Date(Date.now() + IST_OFFSET_MS);
-  const istMidnightUTC = Date.UTC(
-    istNow.getUTCFullYear(),
-    istNow.getUTCMonth(),
-    istNow.getUTCDate()
-  );
-  const daysDiff = Math.floor(
-    (istMidnightUTC - CHALLENGE_START_UTC_MS) / 86400000
-  );
-  if (daysDiff < 0) return 0;
-  return Math.floor(daysDiff / 7) + 1;
 };
 
 /**
@@ -492,7 +473,7 @@ app.put("/api/users/:id", async (req, res) => {
     // changed. Anything absent keeps the value already stored; passing the
     // undefined straight through used to fail the whole request.
     const existing = await db.get(
-      `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks,
+      `SELECT name, avatar, start_date, price_level, clean_weeks, missed_weeks
          FROM users WHERE id = ?`,
       [req.params.id]
     );
@@ -729,8 +710,15 @@ app.post("/api/workouts", async (req, res) => {
     ? markedBy
     : "admin";
 
-  // A session is a workout; 10k steps is half of one. Anything else is a session.
-  const validKind = Object.keys(engine.CREDIT_BY_KIND).includes(kind) ? kind : "session";
+  // A session is a workout; 10k steps is half of one. An unrecognised kind is a
+  // mistake, not a session — silently promoting it would pay full credit for a
+  // walk. Absent is fine: rows written before steps existed are sessions.
+  const kinds = Object.keys(engine.CREDIT_BY_KIND);
+  if (kind != null && !kinds.includes(kind)) {
+    res.status(400).json({ error: `kind must be one of: ${kinds.join(", ")}` });
+    return;
+  }
+  const validKind = kind ?? "session";
 
   const timestamp = new Date().toISOString();
 
@@ -809,6 +797,15 @@ app.post("/api/workouts", async (req, res) => {
 
 app.delete("/api/workouts/:id", async (req, res) => {
   try {
+    // Deleting a day can turn a clean week into a missed one, so it is a write
+    // to that player's record and belongs to them alone.
+    const row = await db.get("SELECT user_id FROM workout_days WHERE id = ?", [req.params.id]);
+    if (!row) {
+      res.status(404).json({ error: "Workout not found" });
+      return;
+    }
+    if (denyUnlessOwner(req, res, row.user_id)) return;
+
     const result = await db.run("DELETE FROM workout_days WHERE id = ?", [
       req.params.id,
     ]);
@@ -1782,6 +1779,8 @@ app.get("/api/season/:userId", async (req, res) => {
 
 // The app posts fines itself. Nobody has to notice a missed week by hand.
 app.post("/api/fines/sync", async (req, res) => {
+  // Posting fines bills real money. Admin only, like closing a week.
+  if (denyUnlessAdmin(req, res)) return;
   try {
     const userIds = req.body.userId
       ? [req.body.userId]

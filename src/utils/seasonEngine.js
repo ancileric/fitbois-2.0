@@ -104,7 +104,11 @@ const runSeason = ({
       const fine = fineAtLevel(priceLevel);
       missedWeeks++;
       billed += fine;
-      outstanding += fine;
+      // A fine is settled week by week. Paying the newest one does not clear the
+      // ones behind it — the balance is the sum of what is still unpaid, not a
+      // running total that any single payment wipes.
+      if (settledWeeks.includes(week)) paid += fine;
+      else outstanding += fine;
       weeks.push({ week, outcome: 'missed', credits, priceLevel, fine });
 
       cleanStreak = 0;
@@ -113,12 +117,6 @@ const runSeason = ({
         priceLevel = priceLevel + 1;
         missesAtLevel = 0;
       }
-    }
-
-    // Settling inside the week clears the balance.
-    if (settledWeeks.includes(week) && outstanding > 0) {
-      paid += outstanding;
-      outstanding = 0;
     }
   }
 
